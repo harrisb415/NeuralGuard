@@ -82,7 +82,7 @@ Each is defensible for a funded product and re-openable later; none serves v1.
 | **Enterprise MDM / GPO / ADMX, WFAS `.wfw` import-export** | Fleet-management surface. A personal tool has no fleet. |
 | **Federated learning + differential privacy (ε=1.0), cloud model CDN, canary/PagerDuty infra** | The vision statement says *no telemetry leaves the device*. Local-only means most of this machinery solves a problem the architecture says it doesn't have. Training is off-device on **your own** archived data. |
 | **ARM64 / QNN NPU inference path** | The models (GBM/RF) run in <2 ms on a CPU EP. NPU acceleration is a micro-optimization for a non-problem at this scale. |
-| **Separate `NGUpdater.exe`, multi-service split, WinUI-from-day-1** | v1 is one service + a CLI. A tray UI and updater are additive, not foundational. |
+| **Separate `NGUpdater.exe`, and a heavy UI framework from day one** | A standalone auto-updater is out of v1. Note the **system-tray GUI (`ngtray`) is *in* scope** — it ships in Phase 2 and is required (a `LocalSystem` service can't show UI; session-0 isolation forces a separate interactive-session process). What's dropped is committing to a heavy framework up front: the tray starts minimal (icon + toast prompts + panic) and grows a dashboard in Phase 3, implemented in whatever is least effort (C#/.NET recommended). |
 | **10 Gbps throughput target** | See D-3. |
 
 ---

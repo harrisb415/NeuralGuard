@@ -25,6 +25,12 @@ anything genuinely new gets blocked-and-prompted, and a lightweight on-device mo
 reviews *completed* flows to decide what should be trusted next time. The AI writes
 rules; deterministic code enforces them.
 
+You drive it from a **system-tray app** (`ngtray`): a tray icon showing the current
+mode, one-click toast prompts to allow or block new connections, a dashboard window
+(live feed, recent blocks, rule management, stats), and a panic button — backed by a
+headless `ngctl` for scripting. (The tray is a separate process by necessity: the
+`ngd` service runs as `LocalSystem` in session 0 and can't show UI itself.)
+
 ## Why this exists (and what it replaces)
 
 This project is the pragmatic redesign of an earlier, far more ambitious spec —
@@ -72,7 +78,7 @@ have a bug — including RDP and, if you're unlucky, the path to ship the fix.
 Non-negotiables baked into the design:
 
 - Develop against a **Hyper-V VM**, never the physical dev box, until enforcement is trusted.
-- A **panic switch** (`ngctl panic`) that deletes NeuralGuard's WFP sublayer filters and fails open.
+- A **panic switch** — one click in the tray menu, or `ngctl panic` — that deletes NeuralGuard's WFP sublayer filters and fails open.
 - **Always-exempt** loopback, DHCP, DNS, and NTP from default-deny.
 - v1 **fails open** on agent crash (a personal machine offline is worse than a missed block).
 

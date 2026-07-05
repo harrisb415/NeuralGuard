@@ -29,13 +29,20 @@ Habit engine → Where ML actually lives → What we measure → Safety rails.**
 
 ## 2. Components (v1)
 
-One service, one CLI, one database. No separate updater/UI processes yet.
+One background service, one tray app, one CLI, one database.
 
 | Component | What it is | Responsibility |
 |-----------|-----------|----------------|
 | `ngd` | Windows service (user mode, runs as `LocalSystem`) | Owns the WFP session and sublayer; subscribes to WFP net events + relevant ETW; runs the decision pipeline; owns the habit engine and policy store; exposes a local control socket. |
-| `ngctl` | Command-line control tool (later: a WinUI/tray front-end) | Talks to `ngd` over a named pipe with a tight ACL. `status`, `learn`, `enforce`, `allow`, `deny`, `rules`, `log`, `panic`. |
+| `ngtray` | System-tray app + GUI (runs in the interactive user session) | The face of NeuralGuard: tray icon showing mode, actionable toast prompts for novel connections, a status/rules dashboard window, and the panic button. Talks to `ngd` over the same named pipe as `ngctl`. See §2.1. |
+| `ngctl` | Command-line control tool (scriptable / headless) | Same named pipe as `ngtray`, for scripting and headless boxes. `status`, `learn`, `enforce`, `allow`, `deny`, `rules`, `log`, `panic`. |
 | `ngpolicy.db` | SQLite database | Rules, the habit tables, the flow-event archive, model metadata. |
+
+> **Why the tray is a separate process, not part of the service.** `ngd` runs as
+> `LocalSystem` in **session 0**, which has no desktop — a service physically
+> cannot show a tray icon, a toast, or a window. Anything the user sees or clicks
+> must come from a process in the interactive session. `ngtray` is that process.
+> This isn't a style choice; it's Windows session isolation.
 
 Telemetry sources `ngd` consumes:
 
@@ -47,6 +54,39 @@ Telemetry sources `ngd` consumes:
 - **DNS client** (ETW `Microsoft-Windows-DNS-Client`, event 3008) — to map a
   destination IP back to the *domain the app actually asked for*, which is the
   identity we care about, not the raw IP.
+
+### 2.1 The tray app — `ngtray`
+
+The tray app is the primary way you interact with NeuralGuard, and it's a required
+component (see the session-0 note above), not a nicety. It launches at logon and
+connects to `ngd` over the ACL'd named pipe.
+
+- **Tray icon = state at a glance.** Distinct icon/badge for **Learning**,
+  **Enforcing**, **Paused**, and **Panic / failed-open**, so the machine's posture
+  is always visible.
+- **Right-click menu:** switch mode (Learn ↔ Enforce) · Pause for 15 min (temporary
+  allow-all) · **Panic** (the kill switch, one click) · Open dashboard · Quit.
+- **Actionable toast prompts.** When enforcement blocks a novel connection, a
+  Windows toast appears — "`app.exe` wants to reach `api.example.com:443` (first time
+  ever)" — with inline **Allow once / Always allow / Block** buttons. Your choice
+  calls back to `ngd`, which writes the rule; the app's automatic retry then
+  succeeds. This is what makes block-notify-retry usable. Rate-limited to avoid
+  toast storms (collapse bursts from one process into a single prompt).
+- **Dashboard window.** An always-available window: live connection feed, recent
+  blocks each with their reason, the rule list (add / edit / remove), habit stats,
+  the autonomy-level toggle, and the weekly digest. Can be a WebView2 control
+  rendering `ngd`'s local status page, or native — either is fine.
+- **Headless fallback.** On a box with no interactive session (or a blocked
+  connection while you're not logged in), `ngd` still logs and applies the
+  configured default; you reconcile from the dashboard later. `ngctl` covers
+  scripting and remote/headless control.
+
+**Implementation.** Because `ngtray` is its own process talking to `ngd` over a
+pipe, its language is free. The pragmatic pick for a tray icon + actionable toasts
++ a small window is **C#/.NET (WinForms or WPF)** — far less boilerplate than C++
+for exactly this — with **native Win32 `Shell_NotifyIcon` + WinRT toast
+notifications** as the pure-C++ alternative if you'd rather keep the whole codebase
+in one language.
 
 ## 3. The decision pipeline (per new connection)
 
@@ -94,11 +134,12 @@ in v1. Instead, from user mode:
   weeks.
 - **Enforcement mode:** we install a **default-block** filter in our sublayer for
   un-learned traffic, plus specific **permit** filters (`FwpmFilterAdd0`) for
-  everything in the learned baseline. When something new is blocked, `ngd` raises a
-  prompt ("`app.exe` → `api.example.com:443`, first time ever — allow?"). On
-  *Allow*, we add a permit rule; the app's automatic retry then succeeds. This is
-  the proven `simplewall` / TinyWall pattern: slightly less slick than a true
-  interception prompt, works fine in practice, and needs no driver.
+  everything in the learned baseline. When something new is blocked, `ngd` signals
+  `ngtray`, which raises an actionable toast ("`app.exe` → `api.example.com:443`,
+  first time ever — Allow once / Always / Block"). On *Allow*, `ngd` adds a permit
+  rule; the app's automatic retry then succeeds. This is the proven `simplewall` /
+  TinyWall pattern: slightly less slick than a true interception prompt, works fine
+  in practice, and needs no driver.
 
 Filters live in a dedicated sublayer with weight above Defender's built-in range
 so our verdicts take precedence; permit/deny filter weights are ordered so a
@@ -205,10 +246,10 @@ throughput become real metrics — but only for the opted-in inspected flows.
 
 - **Develop in a VM.** All enforcement work happens in a Hyper-V VM with snapshots
   until it has earned trust on the physical box.
-- **Panic switch.** `ngctl panic` (and a global hotkey once there's a UI) deletes
-  every filter in NeuralGuard's sublayer, immediately failing open. This is the
-  first feature to build after the sublayer exists, because the first enforcement
-  bug *will* lock you out.
+- **Panic switch.** One click in the `ngtray` menu — or `ngctl panic`, or a global
+  hotkey — deletes every filter in NeuralGuard's sublayer, immediately failing open.
+  This is the first feature to build after the sublayer exists, because the first
+  enforcement bug *will* lock you out.
 - **Always-exempt.** Loopback, DHCP (UDP 67/68 + DHCPv6), DNS (53), and NTP (123)
   are permitted unconditionally at Tier 0, forever. Without this, default-deny takes
   down name resolution and time sync and the whole box appears "offline."

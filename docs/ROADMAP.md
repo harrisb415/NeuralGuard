@@ -48,8 +48,12 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
 - Hard-code the always-exempt Tier 0 rules (loopback/DHCP/DNS/NTP).
 - Auto-generate permit filters (`FwpmFilterAdd0`) for the learned baseline; install a
   default-block for the rest.
-- Implement block-notify-retry: on a blocked novel connection, prompt via `ngctl`
-  (blocking notification for now; tray toast later). *Allow* writes a permit rule.
+- Ship a **minimal `ngtray`**: tray icon showing mode (Learning / Enforcing / Panic),
+  **actionable toast prompts** (Allow once / Always / Block) for blocked novel
+  connections, and **Panic** in the right-click menu. `ngctl` stays as the headless
+  fallback.
+- Implement block-notify-retry behind those prompts: *Allow* writes a permit rule and
+  the app's retry succeeds.
 - Watchdog + fail-open-on-death.
 
 **Gate to next phase:** a week of daily use on the physical box with near-zero false
@@ -64,6 +68,9 @@ blocks and a manageable prompt rate.
   low-novelty connections so you stop being asked about obvious ones.
 - Configurable autonomy: `prompt-everything` → `auto-allow-low-novelty` →
   `auto-allow-and-summarize`.
+- Expand `ngtray` from prompts-only into a full **dashboard window**: live connection
+  feed, recent blocks with reasons, rule management (add / edit / remove), habit
+  stats, the autonomy toggle, and the weekly digest rendered in-app.
 - Weekly text digest of what changed (no model yet — just the frequency stats).
 
 ## Phase 4 — ML on completed flows
