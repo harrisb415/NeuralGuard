@@ -18,7 +18,8 @@ set(NG_DEFS UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 # --- Vendored SQLite (amalgamation) -----------------------------------------
 add_library(sqlite3 STATIC third_party/sqlite/sqlite3.c)
 target_include_directories(sqlite3 PUBLIC third_party/sqlite)
-target_compile_definitions(sqlite3 PUBLIC SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION)
+target_compile_definitions(sqlite3 PUBLIC SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION
+  SQLITE_ENABLE_MATH_FUNCTIONS)  # power()/exp() for habit decay in SQL
 if(MSVC)
   target_compile_options(sqlite3 PRIVATE /w)  # third-party: silence warnings
 endif()

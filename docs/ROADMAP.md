@@ -119,8 +119,10 @@ blocks and a manageable prompt rate.
   noise bug it exposed: inbound peers' ephemeral remote ports created junk
   one-off habits; habits now only record remote ports < 49152 (outbound service
   ports).
+- ✅ Nightly compaction — `ngd compact` decays every habit's count to now and
+  evicts faded ones (< 0.1). SQLite math functions enabled; DB `busy_timeout` set.
 - ⬜ Novelty score (recency + time-of-day + fan-out) → auto-allow low-novelty.
-- ⬜ Nightly compaction (decay/evict/promote stable keys to explicit rules).
+- ⬜ Promote stable keys to explicit permit rules (ties into enforce-baseline).
 - ⬜ Configurable autonomy levels + weekly digest delivery.
 
 ## Phase 3 — Habit scoring & autonomy

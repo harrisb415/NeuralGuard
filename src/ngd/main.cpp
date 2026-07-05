@@ -49,6 +49,7 @@ void PrintUsage() {
         "                                otherwise runs until Ctrl+C.\n"
         "  ngd dump [db]                 Print the learned baseline + recent events.\n"
         "  ngd digest [db]               A 'what's new' digest of the learned baseline.\n"
+        "  ngd compact [db]              Decay habit counts to now and evict faded ones.\n"
         "  ngd -h | --help | /?          Show this help.\n\n"
         "Recording requires an elevated (Administrator) prompt.\n");
 }
@@ -123,6 +124,42 @@ int RunDigest(ng::Db& db) {
         "SELECT count(DISTINCT dest), process_label FROM habits"
         " GROUP BY process_label ORDER BY 1 DESC LIMIT 10;");
 
+    return 0;
+}
+
+// Nightly compaction: decay every habit's count forward to now (same 14-day
+// half-life the recorder uses) and evict the ones that have faded away. Safe to
+// run repeatedly. See docs/DESIGN.md section 5.
+int RunCompact(ng::Db& db) {
+    sqlite3* h = db.handle();
+    FILETIME ft; GetSystemTimeAsFileTime(&ft);
+    double now = ng::util::UnixEpoch(ft);
+
+    int before = 0;
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(h, "SELECT count(*) FROM habits;", -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW) before = sqlite3_column_int(s, 0);
+    sqlite3_finalize(s);
+
+    sqlite3_prepare_v2(h,
+        "UPDATE habits SET count = count * power(0.5, ((?1 - last_epoch)/86400.0)/14.0),"
+        " last_epoch = ?1 WHERE last_epoch IS NOT NULL;", -1, &s, nullptr);
+    sqlite3_bind_double(s, 1, now);
+    if (sqlite3_step(s) != SQLITE_DONE)
+        fprintf(stderr, "compact decay failed: %s\n", sqlite3_errmsg(h));
+    sqlite3_finalize(s);
+
+    char* err = nullptr;
+    sqlite3_exec(h, "DELETE FROM habits WHERE count < 0.1;", nullptr, nullptr, &err);
+    if (err) { fprintf(stderr, "evict failed: %s\n", err); sqlite3_free(err); }
+
+    int after = 0;
+    sqlite3_prepare_v2(h, "SELECT count(*) FROM habits;", -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW) after = sqlite3_column_int(s, 0);
+    sqlite3_finalize(s);
+
+    printf("compact: %d habits decayed, %d evicted (faded), %d remain.\n",
+           before, before - after, after);
     return 0;
 }
 
@@ -205,7 +242,7 @@ int main(int argc, char** argv) {
     const char* dbPath = "ngpolicy.db";
     int seconds = 0;  // 0 = run until Ctrl+C
     if (argc >= 2 && (strcmp(argv[1], "dump") == 0 || strcmp(argv[1], "record") == 0 ||
-                      strcmp(argv[1], "digest") == 0)) {
+                      strcmp(argv[1], "digest") == 0 || strcmp(argv[1], "compact") == 0)) {
         mode = argv[1];
         if (argc >= 3) dbPath = argv[2];
         if (argc >= 4 && strcmp(mode, "record") == 0) seconds = atoi(argv[3]);
@@ -229,6 +266,7 @@ int main(int argc, char** argv) {
 
     if (strcmp(mode, "dump") == 0) return RunDump(db);
     if (strcmp(mode, "digest") == 0) return RunDigest(db);
+    if (strcmp(mode, "compact") == 0) return RunCompact(db);
 
     ng::IdentityResolver resolver(db);
     resolver.init();

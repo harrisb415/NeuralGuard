@@ -54,6 +54,7 @@ bool Db::open(const char* path) {
         fprintf(stderr, "sqlite3_open(%s) failed: %s\n", path, sqlite3_errmsg(db_));
         return false;
     }
+    sqlite3_busy_timeout(db_, 3000);  // tolerate a concurrent writer (recorder)
     char* errmsg = nullptr;
     if (sqlite3_exec(db_, kSchema, nullptr, nullptr, &errmsg) != SQLITE_OK) {
         fprintf(stderr, "schema init failed: %s\n", errmsg ? errmsg : "?");
