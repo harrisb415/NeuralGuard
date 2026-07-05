@@ -1,0 +1,108 @@
+# NeuralGuard — Roadmap
+
+Solo build plan. Phases are ordered so that **each one produces something usable on
+its own** and de-risks the next. Durations are effort-shaped, not calendar
+deadlines; several phases are gated by "let it run and collect data," which is wall-
+clock time, not work.
+
+The guiding rule: **you have a working, safe tool at the end of Phase 2.**
+Everything after that makes it smarter, not functional-for-the-first-time.
+
+---
+
+## Phase 0 — WFP telemetry spike
+
+**Goal:** prove the whole foundation in ~200 lines. No enforcement, no ML, no DB.
+
+- Open a WFP engine session (`FwpmEngineOpen0`), enumerate layers and sublayers.
+- Subscribe to net events (`FwpmNetEventSubscribe4`); enable the *Filtering Platform
+  Connection* audit subcategory so allows show up, not just drops.
+- For each event, resolve `PID → image path → signer/hash` and print a line.
+
+**Done when:** you can watch live outbound connections scroll by, each attributed to
+a real process, on your dev VM. This single spike validates that the user-mode WFP
+path gives you everything the first two phases need.
+
+## Phase 1 — Learning mode (passive)
+
+**Goal:** record a real baseline. Still enforces nothing.
+
+- Stand up `ngd` as a proper Windows service and `ngctl status`.
+- Add the SQLite store (`ngpolicy.db`) and schema for flow events + habit tables.
+- Build the live `PID → identity` table and the DNS-ETW correlation (IP → domain).
+- Compute and persist the **identity key** (§4 of DESIGN) per connection; accumulate
+  habit counts with decay.
+- `ngctl log` / `ngctl rules` to inspect what's being learned.
+
+**Gate to next phase:** run on the physical machine for a few weeks of normal use.
+It's safe — it's read-only. Stop when a normal day is ~95% covered by learned keys
+(watch the "novel connections per day" curve flatten).
+
+## Phase 2 — Enforcement + prompts  ← *the day it replaces your built-in firewall*
+
+**Goal:** actually block, without locking yourself out.
+
+- Create NeuralGuard's own **sublayer** (weight above Defender's range).
+- **Build the panic switch first** (`ngctl panic` → delete all filters in our
+  sublayer). Do not add a single blocking filter before this exists.
+- Hard-code the always-exempt Tier 0 rules (loopback/DHCP/DNS/NTP).
+- Auto-generate permit filters (`FwpmFilterAdd0`) for the learned baseline; install a
+  default-block for the rest.
+- Implement block-notify-retry: on a blocked novel connection, prompt via `ngctl`
+  (blocking notification for now; tray toast later). *Allow* writes a permit rule.
+- Watchdog + fail-open-on-death.
+
+**Gate to next phase:** a week of daily use on the physical box with near-zero false
+blocks and a manageable prompt rate.
+
+## Phase 3 — Habit scoring & autonomy
+
+**Goal:** fewer prompts, smarter defaults — still no ML.
+
+- Nightly compaction: decay, evict, and **promote** stable keys to explicit rules.
+- Novelty score (recency + time-of-day + destination fan-out) drives auto-allow for
+  low-novelty connections so you stop being asked about obvious ones.
+- Configurable autonomy: `prompt-everything` → `auto-allow-low-novelty` →
+  `auto-allow-and-summarize`.
+- Weekly text digest of what changed (no model yet — just the frequency stats).
+
+## Phase 4 — ML on completed flows
+
+**Goal:** the "AI" earns its name, correctly — scoring finished flows, not SYNs.
+
+- Archive completed-flow feature vectors (opt-in, auto-purged) for training data.
+- Off-device training pipeline: completed-flow features + a public IDS dataset for
+  malicious classes → LightGBM → ONNX (INT8).
+- In `ngd`: ONNX Runtime CPU session scores completed flows asynchronously; outputs
+  become **block-next-time proposals** and **anomaly flags** feeding the Phase-3
+  promotion job behind a confidence gate.
+- Optional: an offline LLM turns the weekly digest into prose and highlights the few
+  things worth a human look. Advisory only — it never enforces.
+
+## Phase 5 — (Optional) kernel callout driver
+
+**Goal:** only if Phases 0–4 prove it's worth it.
+
+- A KMDF WFP **callout driver** for the things user mode genuinely can't do: true
+  **pend-and-prompt** at the SYN (`FwpsPendClassify0` → `FwpsCompleteClassify0` →
+  `FwpsReleaseClassifyHandle0`), and per-packet features (timing, entropy) for
+  inspected flows via the SPSC ring buffer.
+- This is where EV cert + WHQL attestation, HVCI compatibility, Driver Verifier, and
+  VM-only development become mandatory. It is a project in itself — hence last, and
+  optional.
+
+---
+
+## Deliberately out of scope (see DECISIONS.md)
+
+Windows Security Center / Action Center registration (gated Microsoft partner
+program), enterprise MDM/GPO/ADMX, WFAS `.wfw` import/export, federated learning +
+differential privacy, cloud model CDN + canary infra, ARM64/QNN NPU inference, EV
+cert & WHQL for v1, and any Gbps throughput target. None of these serve a personal,
+single-machine tool; each is re-openable if the project ever grows up into a product.
+
+## Stack & references
+
+C++20 · WIL · WFP management API (`fwpuclnt.lib`) · SQLite · ONNX Runtime (Phase 4)
+· CMake + vcpkg. Read `simplewall` (henrypp) and Microsoft's `WFPSampler` before
+writing Phase 0.

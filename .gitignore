@@ -1,0 +1,47 @@
+# Build output
+/build/
+/out/
+/bin/
+/obj/
+*.exe
+*.dll
+*.sys
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.obj
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+/_deps/
+
+# vcpkg
+/vcpkg_installed/
+vcpkg/
+
+# Runtime data — never commit collected traffic, habits, or models
+*.db
+*.db-wal
+*.db-shm
+/data/
+*.ndjson
+*.onnx
+*.ngm
+*.pcap
+
+# Secrets / signing
+*.pem
+*.pfx
+*.key
+release-private*
+
+# Editor / OS
+.vs/
+.vscode/
+*.user
+Thumbs.db
+desktop.ini
+.DS_Store
