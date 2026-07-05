@@ -50,4 +50,10 @@ inline std::string IsoNow() {
     return IsoTime(ft);
 }
 
+// FILETIME (100ns since 1601) -> Unix epoch seconds (fractional).
+inline double UnixEpoch(const FILETIME& ft) {
+    ULARGE_INTEGER u; u.LowPart = ft.dwLowDateTime; u.HighPart = ft.dwHighDateTime;
+    return (double)(u.QuadPart - 116444736000000000ULL) / 1.0e7;
+}
+
 }  // namespace ng::util

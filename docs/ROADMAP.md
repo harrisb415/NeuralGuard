@@ -55,9 +55,18 @@ the test VM (built on host via VS 2026, run on the VM over SSH).
   (event 3008) maps resolved IP → domain, so each flow records the name the app
   actually asked for (`flow_events.remote_domain`), not just an IP. (Note: DNS
   answers arrive as v4-mapped IPv6 and must be unwrapped to match the flow's IPv4.)
-- ⬜ Identity key + decaying habit counts (see DESIGN §4–5).
+- ✅ Identity key + decaying habit table (`ng::HabitTracker`, `habits` table).
+  One row per `(process key, destination, port, protocol)` with an exponentially
+  decaying count (14-day half-life) + hour-of-day / day-of-week histograms.
+  Process key is `sig:<thumbprint>` when signed (survives updates), else
+  `sha:<hash>`. Observations deduped by 5-tuple (one connection = one obs).
+  *Known limitation (Phase 3):* first contact to a CDN name keys on the rotating
+  IP because the DNS ETW event lags the WFP event; later flows self-heal to the
+  domain. ASN grouping / domain-backfill is a later refinement.
 
-**Gate to next phase:** run on the physical machine for a few weeks of normal use.
+**Implementation complete.** Remaining gate is a *usage* step, not code: run `ngd`
+passively on the physical machine for a few weeks of normal use to accumulate a
+real baseline before enabling any enforcement (Phase 2).
 It's safe — it's read-only. Stop when a normal day is ~95% covered by learned keys
 (watch the "novel connections per day" curve flatten).
 

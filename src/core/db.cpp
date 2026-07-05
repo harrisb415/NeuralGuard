@@ -30,7 +30,23 @@ const char* kSchema =
     "  image_path    TEXT,"  // raw device path (kept for continuity)
     "  user_sid      TEXT,"
     "  image_id      INTEGER,"
-    "  remote_domain TEXT);"; // resolved via DNS-client ETW, NULL if unknown
+    "  remote_domain TEXT);"  // resolved via DNS-client ETW, NULL if unknown
+    // The learned baseline: one row per (process, destination, port, protocol)
+    // with a decaying count and time-of-day histograms.
+    "CREATE TABLE IF NOT EXISTS habits("
+    "  id INTEGER PRIMARY KEY,"
+    "  process_key   TEXT,"   // sig:<thumb> | sha:<hash> | dev:<path>
+    "  process_label TEXT,"   // signer subject or image basename
+    "  dest          TEXT,"   // domain if known, else remote IP
+    "  remote_port   INTEGER,"
+    "  protocol      INTEGER,"
+    "  count         REAL,"   // exponentially decayed observation count
+    "  first_seen    TEXT,"
+    "  last_seen     TEXT,"
+    "  last_epoch    REAL,"   // unix seconds of last obs (for decay math)
+    "  hour_hist     TEXT,"   // 24 comma-separated counts (UTC hour)
+    "  dow_hist      TEXT,"   // 7 comma-separated counts (0=Sun)
+    "  UNIQUE(process_key, dest, remote_port, protocol));";
 }  // namespace
 
 bool Db::open(const char* path) {

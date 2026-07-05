@@ -14,6 +14,7 @@
 
 #include "core/db.h"
 #include "core/dns.h"
+#include "core/habit.h"
 #include "core/identity.h"
 #include "ngd/recorder.h"
 
@@ -57,6 +58,19 @@ int RunDump(ng::Db& db) {
                (const char*)sqlite3_column_text(s, 2),
                (const char*)sqlite3_column_text(s, 3));
         printf("      %s\n", (const char*)sqlite3_column_text(s, 0));
+    }
+    sqlite3_finalize(s);
+
+    printf("\n--- learned habits (top 25 by decayed count) ---\n");
+    sqlite3_prepare_v2(h,
+        "SELECT process_label, dest, remote_port, protocol, count FROM habits"
+        " ORDER BY count DESC LIMIT 25;", -1, &s, nullptr);
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        printf("  %6.1f  %-28s -> %s:%d/%d\n",
+               sqlite3_column_double(s, 4),
+               (const char*)sqlite3_column_text(s, 0),
+               (const char*)sqlite3_column_text(s, 1),
+               sqlite3_column_int(s, 2), sqlite3_column_int(s, 3));
     }
     sqlite3_finalize(s);
 
@@ -112,7 +126,8 @@ int main(int argc, char** argv) {
     ng::DnsWatcher dns;
     if (!dns.start())
         fprintf(stderr, "warning: DNS correlation disabled (ETW session failed)\n");
-    ng::Recorder recorder(db, resolver, dns);
+    ng::HabitTracker habits(db);
+    ng::Recorder recorder(db, resolver, dns, habits);
     g_recorder = &recorder;
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
 

@@ -29,7 +29,8 @@ add_library(ngcore STATIC
   src/core/db.cpp
   src/core/signer.cpp
   src/core/identity.cpp
-  src/core/dns.cpp)
+  src/core/dns.cpp
+  src/core/habit.cpp)
 target_include_directories(ngcore PUBLIC src)
 target_compile_definitions(ngcore PUBLIC ${NG_DEFS})
 target_compile_options(ngcore PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)

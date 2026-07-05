@@ -64,7 +64,7 @@ std::string IdentityResolver::normalize(const std::string& appId) const {
     return appId;  // unmapped (e.g. \device\mup\.. network path) - leave as-is
 }
 
-long long IdentityResolver::resolve(const std::string& devPath) {
+Identity IdentityResolver::resolve(const std::string& devPath) {
     {
         std::lock_guard<std::mutex> lk(cacheMutex_);
         auto it = cache_.find(devPath);
@@ -78,7 +78,19 @@ long long IdentityResolver::resolve(const std::string& devPath) {
     bool isSigned = GetSigner(wdos, signer, thumb);
     std::string now = util::IsoNow();
 
-    long long id = -1;
+    Identity idn;
+    // Stable habit key: prefer signer thumbprint (survives binary updates), then
+    // content hash, then the raw path as a last resort.
+    if (isSigned)          idn.key = "sig:" + thumb;
+    else if (!sha.empty()) idn.key = "sha:" + sha;
+    else                   idn.key = "dev:" + devPath;
+    if (isSigned) {
+        idn.label = signer;
+    } else {
+        size_t p = dos.find_last_of('\\');
+        idn.label = (p == std::string::npos) ? dos : dos.substr(p + 1);
+    }
+
     {
         std::lock_guard<std::mutex> lk(db_.mutex());
         sqlite3_stmt* s = nullptr;
@@ -96,14 +108,14 @@ long long IdentityResolver::resolve(const std::string& devPath) {
         sqlite3_bind_int(s, 6, isSigned ? 1 : 0);
         bindText(s, 7, now);
         bindText(s, 8, now);
-        if (sqlite3_step(s) == SQLITE_ROW) id = sqlite3_column_int64(s, 0);
+        if (sqlite3_step(s) == SQLITE_ROW) idn.id = sqlite3_column_int64(s, 0);
         sqlite3_finalize(s);
     }
-    if (id >= 0) {
+    {
         std::lock_guard<std::mutex> lk(cacheMutex_);
-        cache_[devPath] = id;
+        cache_[devPath] = idn;
     }
-    return id;
+    return idn;
 }
 
 }  // namespace ng

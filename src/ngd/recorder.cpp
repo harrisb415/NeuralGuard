@@ -3,10 +3,12 @@
 #include "common/wfp_util.h"
 #include "core/db.h"
 #include "core/dns.h"
+#include "core/habit.h"
 #include "core/identity.h"
 #include "core/util.h"
 
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <string>
 
@@ -27,32 +29,51 @@ void Recorder::handleEvent(const void* evOpaque) {
     const bool hasLPort = (h->flags & FWPM_NET_EVENT_FLAG_LOCAL_PORT_SET) != 0;
     const bool hasRPort = (h->flags & FWPM_NET_EVENT_FLAG_REMOTE_PORT_SET) != 0;
 
+    const char* verdict = ngwfp::TypeName(ev->type);
     std::string ts     = util::IsoTime(h->timeStamp);
     std::string local  = ngwfp::IpToStr(h, false);
     std::string remote = ngwfp::IpToStr(h, true);
     std::string app    = ngwfp::AppIdToStr(&h->appId);
     std::string sid    = ngwfp::UserSid(h);
 
-    long long imgId = app.empty() ? -1 : id_.resolve(app);
+    Identity idn = app.empty() ? Identity{} : id_.resolve(app);
     std::string domain = remote.empty() ? "" : dns_.lookup(remote);
 
-    std::lock_guard<std::mutex> lk(db_.mutex());
-    sqlite3_stmt* ins = static_cast<sqlite3_stmt*>(insStmt_);
-    if (!ins) return;
-    sqlite3_reset(ins);
-    sqlite3_clear_bindings(ins);
-    bindText(ins, 1, ts);
-    bindText(ins, 2, ngwfp::TypeName(ev->type));
-    if (hasProto) sqlite3_bind_int(ins, 3, h->ipProtocol); else sqlite3_bind_null(ins, 3);
-    bindText(ins, 4, local);
-    if (hasLPort) sqlite3_bind_int(ins, 5, h->localPort); else sqlite3_bind_null(ins, 5);
-    bindText(ins, 6, remote);
-    if (hasRPort) sqlite3_bind_int(ins, 7, h->remotePort); else sqlite3_bind_null(ins, 7);
-    bindText(ins, 8, app);
-    bindText(ins, 9, sid);
-    if (imgId >= 0) sqlite3_bind_int64(ins, 10, imgId); else sqlite3_bind_null(ins, 10);
-    if (domain.empty()) sqlite3_bind_null(ins, 11); else bindText(ins, 11, domain);
-    if (sqlite3_step(ins) == SQLITE_DONE) ++count_;
+    {
+        std::lock_guard<std::mutex> lk(db_.mutex());
+        sqlite3_stmt* ins = static_cast<sqlite3_stmt*>(insStmt_);
+        if (!ins) return;
+        sqlite3_reset(ins);
+        sqlite3_clear_bindings(ins);
+        bindText(ins, 1, ts);
+        bindText(ins, 2, verdict);
+        if (hasProto) sqlite3_bind_int(ins, 3, h->ipProtocol); else sqlite3_bind_null(ins, 3);
+        bindText(ins, 4, local);
+        if (hasLPort) sqlite3_bind_int(ins, 5, h->localPort); else sqlite3_bind_null(ins, 5);
+        bindText(ins, 6, remote);
+        if (hasRPort) sqlite3_bind_int(ins, 7, h->remotePort); else sqlite3_bind_null(ins, 7);
+        bindText(ins, 8, app);
+        bindText(ins, 9, sid);
+        if (idn.id >= 0) sqlite3_bind_int64(ins, 10, idn.id); else sqlite3_bind_null(ins, 10);
+        if (domain.empty()) sqlite3_bind_null(ins, 11); else bindText(ins, 11, domain);
+        if (sqlite3_step(ins) == SQLITE_DONE) ++count_;
+    }
+
+    // Update the learned baseline for real outbound connections. Count only the
+    // ALE classify verdicts (not capability/other events) and require a real
+    // remote endpoint + a resolved process, to approximate one obs per connection.
+    const bool isClassify = (strcmp(verdict, "ALLOW") == 0 || strcmp(verdict, "DROP") == 0);
+    const bool realRemote = hasRPort && h->remotePort > 0 && !remote.empty() &&
+                            remote != "0.0.0.0" && remote != "::";
+    if (isClassify && realRemote && idn.id >= 0) {
+        std::string dest = domain.empty() ? remote : domain;
+        SYSTEMTIME st{}; FileTimeToSystemTime(&h->timeStamp, &st);
+        std::string token = local + "|" + std::to_string(hasLPort ? h->localPort : 0) + "|" +
+                            remote + "|" + std::to_string(h->remotePort) + "|" +
+                            std::to_string(h->ipProtocol);
+        habits_.observe(idn.key, idn.label, dest, h->remotePort, h->ipProtocol,
+                        ts, util::UnixEpoch(h->timeStamp), st.wHour, st.wDayOfWeek, token);
+    }
 }
 
 void Recorder::stop() {
