@@ -106,7 +106,10 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
   Verified against the live baseline (84 permits): known app+port flows, unobserved
   is blocked, DNS/SSH keep working. Per-(app,port) granularity is the safe first cut.
 - ⬜ Extend default-deny to IPv6; per-destination/domain tightening.
-- ⬜ Minimal `ngtray` + block-notify-retry.
+- ◐ Minimal `ngtray` — native Win32 tray (icon + right-click Status / **Panic** /
+  Quit + startup balloon), shells out to `ngctl` with UAC for privileged actions.
+  Built + smoke-tested. Remaining: actionable toast prompts + the `ngd`→tray
+  notify pipe (block-notify-retry) + live mode indicator.
 - ⬜ Watchdog + fail-open-on-death; persistent enforcement (service holds it, vs
   the CLI dead-man switch used for testing).
 

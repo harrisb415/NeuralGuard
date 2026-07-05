@@ -57,3 +57,9 @@ add_executable(ngctl src/ngctl/main.cpp)
 target_compile_definitions(ngctl PRIVATE ${NG_DEFS})
 target_compile_options(ngctl PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 target_link_libraries(ngctl PRIVATE ngcore ws2_32)
+
+# --- ngtray (Phase 2c): system-tray UI (native Win32, runs in user session) --
+add_executable(ngtray WIN32 src/ngtray/main.cpp)
+target_compile_definitions(ngtray PRIVATE ${NG_DEFS})
+target_compile_options(ngtray PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+target_link_libraries(ngtray PRIVATE user32 shell32)
