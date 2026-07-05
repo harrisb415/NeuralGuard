@@ -10,7 +10,10 @@
 // blocked connections (the block-notify-retry flow) need the ngd->tray pipe and
 // come next.
 
+#include "ngtray/dashboard.h"
+
 #include <windows.h>
+#include <objbase.h>
 #include <shellapi.h>
 
 #include <string>
@@ -19,9 +22,10 @@
 namespace {
 
 constexpr UINT WM_TRAY = WM_APP + 1;
-enum { ID_STATUS = 1, ID_PANIC = 2, ID_QUIT = 3 };
+enum { ID_STATUS = 1, ID_PANIC = 2, ID_QUIT = 3, ID_DASHBOARD = 4 };
 
 NOTIFYICONDATAW g_nid{};
+HINSTANCE g_hInst = nullptr;
 
 std::wstring ExeDir() {
     wchar_t path[MAX_PATH];
@@ -109,6 +113,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             if (LOWORD(l) == WM_RBUTTONUP || LOWORD(l) == WM_CONTEXTMENU) {
                 POINT pt; GetCursorPos(&pt);
                 HMENU m = CreatePopupMenu();
+                AppendMenuW(m, MF_STRING, ID_DASHBOARD, L"Dashboard");
                 AppendMenuW(m, MF_STRING, ID_STATUS, L"Status");
                 AppendMenuW(m, MF_STRING, ID_PANIC, L"Panic (fail open)");
                 AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
@@ -120,6 +125,7 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             return 0;
         case WM_COMMAND:
             switch (LOWORD(w)) {
+                case ID_DASHBOARD: ng::OpenDashboard(g_hInst); break;
                 case ID_STATUS: RunCtl(L"status"); break;
                 case ID_PANIC:  RunCtl(L"panic");  break;
                 case ID_QUIT:   DestroyWindow(h);  break;
@@ -139,6 +145,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     // Single instance - don't stack tray icons.
     CreateMutexW(nullptr, TRUE, L"NeuralGuard_ngtray_singleton");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
+
+    g_hInst = hInst;
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // WebView2 needs COM (STA)
 
     WNDCLASSW wc{};
     wc.lpfnWndProc = WndProc;

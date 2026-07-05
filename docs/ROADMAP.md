@@ -118,10 +118,12 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
   thread; Allow → permit (retry succeeds), else stays blocked; auto-reverts on
   stop. Verified headless (baseline permits / novel blocked / drop-detected /
   reverted); live toast click-through is interactive.
-- ⬜ **Complete config UI** (separate, larger): a dashboard to view/edit rules,
-  browse the baseline, toggle Learn↔Enforce, manage the allow-list, tune autonomy
-  — design earmarks a WebView2 window fed by an `ngd` local API. Tray today is
-  NOT this.
+- ◐ **Config UI (WebView2 dashboard)** — `ngtray` → Dashboard opens a WebView2
+  window (static loader vendored, no extra DLL): dark-theme HTML showing baseline
+  stats + top talkers, with Enforce / Learn / Panic / Refresh (shell ngd/ngctl via
+  UAC; data read from the DB via ngcore over postMessage). Builds/runs; runtime
+  present on the VM; render + clicks are interactive. Remaining: editable rules, a
+  live mode/status indicator, allow-list management, autonomy settings.
 - ⬜ Watchdog + fail-open-on-death; persistent enforcement service.
 
 **Gate to next phase:** a week of daily use on the physical box with near-zero false
