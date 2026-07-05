@@ -13,13 +13,16 @@
 // Ctrl+C to stop recording.
 
 #include "core/db.h"
+#include "core/dns.h"
 #include "core/identity.h"
 #include "ngd/recorder.h"
 
 #include <windows.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <thread>
 
 namespace {
 
@@ -57,18 +60,27 @@ int RunDump(ng::Db& db) {
     }
     sqlite3_finalize(s);
 
+    printf("\n--- domains correlated (via DNS ETW) ---\n");
+    sqlite3_prepare_v2(h,
+        "SELECT remote_domain, count(*) FROM flow_events"
+        " WHERE remote_domain IS NOT NULL GROUP BY remote_domain ORDER BY 2 DESC LIMIT 20;",
+        -1, &s, nullptr);
+    while (sqlite3_step(s) == SQLITE_ROW)
+        printf("  %5d  %s\n", sqlite3_column_int(s, 1), (const char*)sqlite3_column_text(s, 0));
+    sqlite3_finalize(s);
+
     printf("\n--- most recent 15 events ---\n");
     sqlite3_prepare_v2(h,
         "SELECT fe.ts_utc, fe.verdict, fe.protocol, fe.remote_addr, fe.remote_port,"
-        " COALESCE(pi.image_path, fe.image_path), COALESCE(pi.signer,'')"
+        " COALESCE(fe.remote_domain, fe.remote_addr), COALESCE(pi.image_path, fe.image_path)"
         " FROM flow_events fe LEFT JOIN process_identity pi ON fe.image_id = pi.id"
         " ORDER BY fe.id DESC LIMIT 15;", -1, &s, nullptr);
     while (sqlite3_step(s) == SQLITE_ROW) {
-        printf("  %s %-8s p=%d -> %s:%d  %s  {%s}\n",
+        printf("  %s %-8s p=%d -> %s:%d (%s)  %s\n",
                sqlite3_column_text(s, 0), sqlite3_column_text(s, 1),
                sqlite3_column_int(s, 2),
                sqlite3_column_text(s, 3), sqlite3_column_int(s, 4),
-               sqlite3_column_text(s, 5) ? (const char*)sqlite3_column_text(s, 5) : "",
+               (const char*)sqlite3_column_text(s, 5),
                sqlite3_column_text(s, 6) ? (const char*)sqlite3_column_text(s, 6) : "");
     }
     sqlite3_finalize(s);
@@ -80,11 +92,14 @@ int RunDump(ng::Db& db) {
 int main(int argc, char** argv) {
     const char* mode = "record";
     const char* dbPath = "ngpolicy.db";
+    int seconds = 0;  // 0 = run until Ctrl+C
     if (argc >= 2 && (strcmp(argv[1], "dump") == 0 || strcmp(argv[1], "record") == 0)) {
         mode = argv[1];
         if (argc >= 3) dbPath = argv[2];
+        if (argc >= 4 && strcmp(mode, "record") == 0) seconds = atoi(argv[3]);
     } else if (argc >= 2) {
         dbPath = argv[1];
+        if (argc >= 3) seconds = atoi(argv[2]);
     }
 
     ng::Db db;
@@ -94,10 +109,23 @@ int main(int argc, char** argv) {
 
     ng::IdentityResolver resolver(db);
     resolver.init();
-    ng::Recorder recorder(db, resolver);
+    ng::DnsWatcher dns;
+    if (!dns.start())
+        fprintf(stderr, "warning: DNS correlation disabled (ETW session failed)\n");
+    ng::Recorder recorder(db, resolver, dns);
     g_recorder = &recorder;
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
 
-    printf("ngd - recording WFP net events to %s\n", dbPath);
-    return recorder.run() ? 0 : 1;
+    printf("ngd - recording WFP net events to %s%s\n", dbPath,
+           seconds > 0 ? " (timed)" : "");
+    std::thread timer;
+    if (seconds > 0)
+        timer = std::thread([&recorder, seconds]() {
+            Sleep((DWORD)seconds * 1000);
+            recorder.stop();
+        });
+    bool ok = recorder.run();
+    if (timer.joinable()) timer.join();
+    dns.stop();
+    return ok ? 0 : 1;
 }

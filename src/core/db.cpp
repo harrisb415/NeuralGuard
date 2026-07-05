@@ -27,9 +27,10 @@ const char* kSchema =
     "  protocol    INTEGER,"
     "  local_addr  TEXT, local_port  INTEGER,"
     "  remote_addr TEXT, remote_port INTEGER,"
-    "  image_path  TEXT,"   // raw device path (kept for continuity)
-    "  user_sid    TEXT,"
-    "  image_id    INTEGER);";
+    "  image_path    TEXT,"  // raw device path (kept for continuity)
+    "  user_sid      TEXT,"
+    "  image_id      INTEGER,"
+    "  remote_domain TEXT);"; // resolved via DNS-client ETW, NULL if unknown
 }  // namespace
 
 bool Db::open(const char* path) {
@@ -43,8 +44,10 @@ bool Db::open(const char* path) {
         sqlite3_free(errmsg);
         return false;
     }
-    // Defensive migration for a v1 DB (ignore "duplicate column" error).
+    // Defensive migrations for older DBs (ignore "duplicate column" errors).
     sqlite3_exec(db_, "ALTER TABLE flow_events ADD COLUMN image_id INTEGER;",
+                 nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE flow_events ADD COLUMN remote_domain TEXT;",
                  nullptr, nullptr, nullptr);
     return true;
 }

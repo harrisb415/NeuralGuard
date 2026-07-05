@@ -8,10 +8,12 @@ namespace ng {
 
 class Db;
 class IdentityResolver;
+class DnsWatcher;
 
 class Recorder {
 public:
-    Recorder(Db& db, IdentityResolver& id) : db_(db), id_(id) {}
+    Recorder(Db& db, IdentityResolver& id, DnsWatcher& dns)
+        : db_(db), id_(id), dns_(dns) {}
 
     bool run();   // subscribe and block until stop(); false on setup failure
     void stop();  // signal run() to return (called from a console Ctrl handler)
@@ -22,6 +24,7 @@ public:
 private:
     Db& db_;
     IdentityResolver& id_;
+    DnsWatcher& dns_;
     void* stopEvent_ = nullptr;   // HANDLE
     void* insStmt_   = nullptr;   // sqlite3_stmt*
     std::atomic<unsigned long long> count_{0};

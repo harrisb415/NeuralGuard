@@ -28,11 +28,12 @@ endif()
 add_library(ngcore STATIC
   src/core/db.cpp
   src/core/signer.cpp
-  src/core/identity.cpp)
+  src/core/identity.cpp
+  src/core/dns.cpp)
 target_include_directories(ngcore PUBLIC src)
 target_compile_definitions(ngcore PUBLIC ${NG_DEFS})
 target_compile_options(ngcore PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
-target_link_libraries(ngcore PUBLIC sqlite3 bcrypt crypt32 wintrust)
+target_link_libraries(ngcore PUBLIC sqlite3 bcrypt crypt32 wintrust tdh advapi32 ws2_32)
 
 # --- ngmon (Phase 0): WFP net-event printer ---------------------------------
 add_executable(ngmon src/ngmon/main.cpp)

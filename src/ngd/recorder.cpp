@@ -2,6 +2,7 @@
 
 #include "common/wfp_util.h"
 #include "core/db.h"
+#include "core/dns.h"
 #include "core/identity.h"
 #include "core/util.h"
 
@@ -33,6 +34,7 @@ void Recorder::handleEvent(const void* evOpaque) {
     std::string sid    = ngwfp::UserSid(h);
 
     long long imgId = app.empty() ? -1 : id_.resolve(app);
+    std::string domain = remote.empty() ? "" : dns_.lookup(remote);
 
     std::lock_guard<std::mutex> lk(db_.mutex());
     sqlite3_stmt* ins = static_cast<sqlite3_stmt*>(insStmt_);
@@ -49,6 +51,7 @@ void Recorder::handleEvent(const void* evOpaque) {
     bindText(ins, 8, app);
     bindText(ins, 9, sid);
     if (imgId >= 0) sqlite3_bind_int64(ins, 10, imgId); else sqlite3_bind_null(ins, 10);
+    if (domain.empty()) sqlite3_bind_null(ins, 11); else bindText(ins, 11, domain);
     if (sqlite3_step(ins) == SQLITE_DONE) ++count_;
 }
 
@@ -60,8 +63,8 @@ bool Recorder::run() {
     sqlite3_stmt* ins = nullptr;
     if (sqlite3_prepare_v2(db_.handle(),
             "INSERT INTO flow_events"
-            "(ts_utc,verdict,protocol,local_addr,local_port,remote_addr,remote_port,image_path,user_sid,image_id)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?);",
+            "(ts_utc,verdict,protocol,local_addr,local_port,remote_addr,remote_port,image_path,user_sid,image_id,remote_domain)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?);",
             -1, &ins, nullptr) != SQLITE_OK) {
         fprintf(stderr, "prepare insert failed: %s\n", sqlite3_errmsg(db_.handle()));
         return false;

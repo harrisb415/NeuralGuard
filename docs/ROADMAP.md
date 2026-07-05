@@ -51,7 +51,10 @@ the test VM (built on host via VS 2026, run on the VM over SSH).
 - ✅ Refactor — split the growing `ngd/main.cpp` into an `ngcore` static lib
   (`db`, `identity`, `signer`, `util`) + `ngd` (`recorder`, `main`), so later
   binaries (ngctl, service, tray backend) reuse the core.
-- ⬜ DNS correlation — consume `Microsoft-Windows-DNS-Client` ETW, map IP → domain.
+- ✅ DNS correlation — a real-time ETW consumer of `Microsoft-Windows-DNS-Client`
+  (event 3008) maps resolved IP → domain, so each flow records the name the app
+  actually asked for (`flow_events.remote_domain`), not just an IP. (Note: DNS
+  answers arrive as v4-mapped IPv6 and must be unwrapped to match the flow's IPv4.)
 - ⬜ Identity key + decaying habit counts (see DESIGN §4–5).
 
 **Gate to next phase:** run on the physical machine for a few weeks of normal use.
