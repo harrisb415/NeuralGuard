@@ -6,9 +6,10 @@ NeuralGuard watches how *you* use the network, learns your normal, and quietly
 blocks the stuff that doesn't fit. It is designed to be built and run by one
 person on their own machine, not by a team shipping a signed kernel product.
 
-> **Status:** design phase. No code yet — this repo currently holds the
-> architecture and roadmap. Phase 0 (a ~200-line WFP telemetry spike) is the
-> next concrete step.
+> **Status:** Phase 0 complete. `ngmon` — a user-mode WFP net-event monitor —
+> builds on the host and streams live connections with process attribution on the
+> test VM (allow/drop, 5-tuple, image path, user SID). Phase 1 (learning mode:
+> persist a baseline to SQLite) is next. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ---
 

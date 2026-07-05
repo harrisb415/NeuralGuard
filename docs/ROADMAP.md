@@ -10,18 +10,24 @@ Everything after that makes it smarter, not functional-for-the-first-time.
 
 ---
 
-## Phase 0 — WFP telemetry spike
+## Phase 0 — WFP telemetry spike  ✅ DONE
 
 **Goal:** prove the whole foundation in ~200 lines. No enforcement, no ML, no DB.
 
-- Open a WFP engine session (`FwpmEngineOpen0`), enumerate layers and sublayers.
-- Subscribe to net events (`FwpmNetEventSubscribe4`); enable the *Filtering Platform
-  Connection* audit subcategory so allows show up, not just drops.
-- For each event, resolve `PID → image path → signer/hash` and print a line.
+- Open a WFP engine session (`FwpmEngineOpen0`), subscribe to net events
+  (`FwpmNetEventSubscribe4`), and print each allow/drop with the 5-tuple, image
+  path (from `appId`), and user SID. Implemented in [`src/ngmon/main.cpp`](../src/ngmon/main.cpp).
 
-**Done when:** you can watch live outbound connections scroll by, each attributed to
-a real process, on your dev VM. This single spike validates that the user-mode WFP
-path gives you everything the first two phases need.
+**Result:** working — `ngmon` streams live connections attributed to processes on
+the test VM (built on host via VS 2026, run on the VM over SSH).
+
+**Two gotchas found and documented in the code:**
+1. Events need engine-side enablement — `FwpmEngineSetOption0(FWPM_ENGINE_COLLECT_NET_EVENTS)`
+   plus the `CLASSIFY_ALLOW` keyword — or you get *zero* events, not just missing allows.
+2. Those options can't be set from a `FWPM_SESSION_FLAG_DYNAMIC` session
+   (`FWP_E_DYNAMIC_SESSION_IN_PROGRESS`), so `ngmon` uses a normal session.
+   Also enable the *Filtering Platform Connection* audit subcategory
+   (`auditpol /set /subcategory:"Filtering Platform Connection" /success:enable /failure:enable`).
 
 ## Phase 1 — Learning mode (passive)
 
