@@ -50,6 +50,9 @@ void PrintUsage() {
         "                              Permit STABLE (app, port) pairs from <db> (seen on\n"
         "                              >= min-conns connections, default 3), default-deny\n"
         "                              the rest for <seconds>, then auto-revert.\n"
+        "  ngctl notify <app> <dest> <port>\n"
+        "                              Prompt the tray about a connection and enact the\n"
+        "                              answer (this is what ngd calls on a block).\n"
         "  ngctl -h | --help | /?      This help.\n\n"
         "Requires an elevated (Administrator) prompt.\n");
 }
@@ -60,6 +63,24 @@ bool ParseIpv4Host(const char* s, uint32_t& out) {
     if (InetPtonA(AF_INET, s, &a) != 1) return false;
     out = ntohl(a.s_addr);
     return true;
+}
+
+// Connect to ngtray's prompt pipe (retrying if busy). INVALID_HANDLE_VALUE if
+// the tray isn't running.
+HANDLE ConnectPrompt() {
+    const wchar_t* kPipe = L"\\\\.\\pipe\\neuralguard";
+    for (int i = 0; i < 20; ++i) {
+        HANDLE p = CreateFileW(kPipe, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                               OPEN_EXISTING, 0, nullptr);
+        if (p != INVALID_HANDLE_VALUE) {
+            DWORD mode = PIPE_READMODE_MESSAGE;
+            SetNamedPipeHandleState(p, &mode, nullptr, nullptr);
+            return p;
+        }
+        if (GetLastError() != ERROR_PIPE_BUSY) break;
+        WaitNamedPipeW(kPipe, 2000);
+    }
+    return INVALID_HANDLE_VALUE;
 }
 
 int Rule(int argc, char** argv, bool block) {
@@ -179,6 +200,39 @@ int main(int argc, char** argv) {
         Sleep((DWORD)secs * 1000);
         int n = enf.panic();
         printf("Reverted (removed %d filter(s)).\n", n);
+        return 0;
+    }
+    if (strcmp(cmd, "notify") == 0) {
+        // Simulate the block-notify-retry prompt: ask the tray about a connection
+        // and enact the answer. This is what ngd will call when it blocks a novel
+        // connection. Usage: ngctl notify <app-path> <dest> <port>
+        if (argc < 5) {
+            fprintf(stderr, "usage: ngctl notify <app-path> <dest> <port>\n");
+            return 2;
+        }
+        HANDLE pipe = ConnectPrompt();
+        if (pipe == INVALID_HANDLE_VALUE) {
+            fprintf(stderr, "could not reach ngtray (is the tray running?)\n");
+            return 1;
+        }
+        std::string msg = std::string(argv[2]) + "\t" + argv[3] + "\t" + argv[4];
+        DWORD wr = 0;
+        WriteFile(pipe, msg.c_str(), (DWORD)msg.size(), &wr, nullptr);
+        char decision = 'B';
+        DWORD rd = 0;
+        ReadFile(pipe, &decision, 1, &rd, nullptr);
+        CloseHandle(pipe);
+
+        const char* label = (decision == 'A') ? "ALWAYS ALLOW"
+                          : (decision == 'O') ? "ALLOW ONCE" : "BLOCK";
+        printf("decision: %s\n", label);
+        if (decision == 'A') {
+            ng::Enforcer enf;
+            if (enf.open() &&
+                enf.addPermitAppId(ng::util::Widen(argv[2]).c_str(),
+                                   (uint16_t)atoi(argv[4]), IPPROTO_TCP))
+                printf("permit added for %s :%s\n", argv[2], argv[4]);
+        }
         return 0;
     }
     if (strcmp(cmd, "block") == 0) return Rule(argc, argv, true);

@@ -106,12 +106,21 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
   Verified against the live baseline (84 permits): known app+port flows, unobserved
   is blocked, DNS/SSH keep working. Per-(app,port) granularity is the safe first cut.
 - ⬜ Extend default-deny to IPv6; per-destination/domain tightening.
-- ◐ Minimal `ngtray` — native Win32 tray (icon + right-click Status / **Panic** /
-  Quit + startup balloon), shells out to `ngctl` with UAC for privileged actions.
-  Built + smoke-tested. Remaining: actionable toast prompts + the `ngd`→tray
-  notify pipe (block-notify-retry) + live mode indicator.
-- ⬜ Watchdog + fail-open-on-death; persistent enforcement (service holds it, vs
-  the CLI dead-man switch used for testing).
+- ◐ `ngtray` — native Win32 tray (icon + Status / **Panic** / Quit + startup
+  balloon) **and the notify-pipe + prompt**: tray runs a `\\.\pipe\neuralguard`
+  server; `ngctl notify <app> <dest> <port>` prompts the user (balloon + Allow
+  always/once/Block dialog) and enacts the answer (a permit on Allow). Pipe
+  verified reachable; click-through is interactive. Remaining: true inline-button
+  toasts (COM activator) + a live mode indicator.
+- ⬜ **Full block-notify-retry**: `ngd` runs as the live enforcer (holds
+  default-deny + stable permits), watches WFP drops, and fires `notify`
+  automatically on a novel/provisional connection. (The prompt mechanism above is
+  done; this is the enforcement-daemon integration that triggers it.)
+- ⬜ **Complete config UI** (separate, larger): a dashboard to view/edit rules,
+  browse the baseline, toggle Learn↔Enforce, manage the allow-list, tune autonomy
+  — design earmarks a WebView2 window fed by an `ngd` local API. Tray today is
+  NOT this.
+- ⬜ Watchdog + fail-open-on-death; persistent enforcement service.
 
 **Gate to next phase:** a week of daily use on the physical box with near-zero false
 blocks and a manageable prompt rate.

@@ -14,6 +14,7 @@
 #include <shellapi.h>
 
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -34,6 +35,72 @@ std::wstring ExeDir() {
 void RunCtl(const wchar_t* sub) {
     std::wstring args = L"/k \"\"" + ExeDir() + L"\\ngctl.exe\" " + sub + L"\"";
     ShellExecuteW(nullptr, L"runas", L"cmd.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+}
+
+std::wstring Widen(const std::string& s) {
+    if (s.empty()) return L"";
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+    std::wstring w(n, 0);
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), w.data(), n);
+    return w;
+}
+
+// Show a balloon + an actionable dialog for a blocked connection, and return the
+// user's decision: 'A' always allow, 'O' allow once, 'B' block. (A true inline-
+// button toast on unpackaged Win32 needs a COM activator; balloon + dialog is the
+// v1 that gives the same choice with far less plumbing.)
+char PromptUser(const std::string& msg) {
+    // msg is "app\tdest\tport"
+    std::string app = msg, dest, port;
+    size_t t1 = msg.find('\t');
+    if (t1 != std::string::npos) {
+        app = msg.substr(0, t1);
+        size_t t2 = msg.find('\t', t1 + 1);
+        if (t2 != std::string::npos) { dest = msg.substr(t1 + 1, t2 - t1 - 1); port = msg.substr(t2 + 1); }
+    }
+
+    // Balloon to draw attention.
+    g_nid.uFlags |= NIF_INFO;
+    wcscpy_s(g_nid.szInfoTitle, L"NeuralGuard - new connection");
+    std::wstring info = Widen(app) + L" -> " + Widen(dest) + L":" + Widen(port);
+    wcsncpy_s(g_nid.szInfo, info.c_str(), _TRUNCATE);
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+    g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+
+    std::wstring text = Widen(app) + L"\n\nwants to connect to  " + Widen(dest) + L":" + Widen(port) +
+        L"\n\nYes = Always allow this app on this port"
+        L"\nNo = Allow once"
+        L"\nCancel = Block";
+    int r = MessageBoxW(nullptr, text.c_str(), L"NeuralGuard",
+                        MB_YESNOCANCEL | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND);
+    return (r == IDYES) ? 'A' : (r == IDNO) ? 'O' : 'B';
+}
+
+// Pipe server: the privileged side (ngd/ngctl) connects and sends a prompt; we
+// ask the user and write back the decision byte. One prompt at a time is fine.
+void PipeServer() {
+    const wchar_t* kPipe = L"\\\\.\\pipe\\neuralguard";
+    for (;;) {
+        HANDLE pipe = CreateNamedPipeW(kPipe, PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+            1, 4096, 4096, 0, nullptr);
+        if (pipe == INVALID_HANDLE_VALUE) { Sleep(1000); continue; }
+
+        BOOL ok = ConnectNamedPipe(pipe, nullptr) ? TRUE
+                  : (GetLastError() == ERROR_PIPE_CONNECTED);
+        if (ok) {
+            char buf[1024] = {};
+            DWORD n = 0;
+            if (ReadFile(pipe, buf, sizeof(buf) - 1, &n, nullptr) && n > 0) {
+                char decision = PromptUser(std::string(buf, n));
+                DWORD wr = 0;
+                WriteFile(pipe, &decision, 1, &wr, nullptr);
+                FlushFileBuffers(pipe);
+            }
+        }
+        DisconnectNamedPipe(pipe);
+        CloseHandle(pipe);
+    }
 }
 
 LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
@@ -96,6 +163,9 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     wcscpy_s(g_nid.szInfo, L"Tray running. Right-click for Panic.");
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+
+    // Listen for connection prompts from the privileged daemon.
+    std::thread(PipeServer).detach();
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
