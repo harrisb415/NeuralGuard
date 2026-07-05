@@ -20,6 +20,13 @@ public:
     // (0 = any) and protocol (0 = any). block=false adds a permit.
     bool addRemoteIpv4Rule(uint32_t ipv4Host, uint16_t port, uint8_t proto, bool block);
 
+    // Turn on default-deny for OUTBOUND IPv4 (ALE_AUTH_CONNECT_V4): install the
+    // Tier-0 always-exempt permits (loopback, private/link-local ranges, DNS,
+    // DHCP, NTP) plus a catch-all block. Inbound is deliberately left untouched
+    // so an inbound-initiated session (e.g. SSH) can't be cut off. Call panic()
+    // to revert. Returns true on success.
+    bool enableDefaultDeny();
+
     int  countRules();   // NeuralGuard filters currently installed
 
     // Delete ALL NeuralGuard filters and our sublayer/provider. Returns the
@@ -28,6 +35,11 @@ public:
 
 private:
     bool ensureObjects();
+    // Low-level outbound-V4 filter helpers (weight: higher wins; block uses 0).
+    bool addV4(bool block, void* conds, unsigned nc, unsigned char weight,
+               const wchar_t* name);
+    bool addPermitCidrV4(uint32_t addrHost, uint32_t maskHost);
+    bool addPermitRemotePortV4(uint16_t port, uint8_t proto);
     void* engine_ = nullptr;  // HANDLE
 };
 

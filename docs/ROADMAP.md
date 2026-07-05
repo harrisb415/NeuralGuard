@@ -95,8 +95,13 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
   deletes every NeuralGuard filter (then drops the sublayer) to fail open. Verified
   on the VM: `block 1.1.1.1 443` refuses the connection, `panic` restores it; SSH
   unaffected. No default-block yet — only explicit rules.
-- ⬜ Tier 0 always-exempt rules (loopback/DHCP/DNS/NTP) + auto-permit the learned
-  baseline + default-block the rest.
+- ✅ Tier-0 always-exempt + default-deny (outbound IPv4) — `Enforcer::enableDefaultDeny()`
+  permits loopback / RFC1918 / link-local / DNS / DHCP / NTP (weight 15) above a
+  catch-all block (weight 0); inbound untouched so SSH can't be cut off. `ngctl
+  enforce <seconds>` runs it with a mandatory auto-revert (dead-man switch). Verified:
+  public outbound blocked while DNS + SSH keep working; clean revert.
+- ⬜ Auto-permit the learned `habits` baseline (translate habits → WFP permits), and
+  extend default-deny to IPv6.
 - ⬜ Minimal `ngtray` + block-notify-retry.
 - ⬜ Watchdog + fail-open-on-death.
 

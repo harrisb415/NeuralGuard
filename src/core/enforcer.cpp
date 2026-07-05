@@ -161,6 +161,67 @@ bool Enforcer::addRemoteIpv4Rule(uint32_t ipv4Host, uint16_t port, uint8_t proto
     return true;
 }
 
+bool Enforcer::addV4(bool block, void* condsV, unsigned nc, unsigned char weight,
+                     const wchar_t* name) {
+    FWPM_FILTER0 filter{};
+    filter.layerKey = FWPM_LAYER_ALE_AUTH_CONNECT_V4;
+    filter.subLayerKey = kSubLayerGuid;
+    filter.providerKey = const_cast<GUID*>(&kProviderGuid);
+    filter.displayData.name = const_cast<wchar_t*>(name);
+    filter.action.type = block ? FWP_ACTION_BLOCK : FWP_ACTION_PERMIT;
+    filter.weight.type = FWP_UINT8;
+    filter.weight.uint8 = weight;
+    filter.numFilterConditions = nc;
+    filter.filterCondition = static_cast<FWPM_FILTER_CONDITION0*>(condsV);
+    UINT64 id = 0;
+    DWORD e = FwpmFilterAdd0((HANDLE)engine_, &filter, nullptr, &id);
+    if (e != ERROR_SUCCESS) {
+        fprintf(stderr, "FwpmFilterAdd0(%ls) failed: 0x%08lX\n", name, e);
+        return false;
+    }
+    return true;
+}
+
+bool Enforcer::addPermitCidrV4(uint32_t addrHost, uint32_t maskHost) {
+    FWP_V4_ADDR_AND_MASK am{}; am.addr = addrHost; am.mask = maskHost;
+    FWPM_FILTER_CONDITION0 c{};
+    c.fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
+    c.matchType = FWP_MATCH_EQUAL;
+    c.conditionValue.type = FWP_V4_ADDR_MASK;
+    c.conditionValue.v4AddrMask = &am;
+    return addV4(false, &c, 1, 15, L"NeuralGuard exempt (subnet)");
+}
+
+bool Enforcer::addPermitRemotePortV4(uint16_t port, uint8_t proto) {
+    FWPM_FILTER_CONDITION0 c[2]{};
+    c[0].fieldKey = FWPM_CONDITION_IP_PROTOCOL;
+    c[0].matchType = FWP_MATCH_EQUAL;
+    c[0].conditionValue.type = FWP_UINT8;
+    c[0].conditionValue.uint8 = proto;
+    c[1].fieldKey = FWPM_CONDITION_IP_REMOTE_PORT;
+    c[1].matchType = FWP_MATCH_EQUAL;
+    c[1].conditionValue.type = FWP_UINT16;
+    c[1].conditionValue.uint16 = port;
+    return addV4(false, c, 2, 15, L"NeuralGuard exempt (port)");
+}
+
+bool Enforcer::enableDefaultDeny() {
+    // Tier-0 always-exempt permits (weight 15, above the catch-all block).
+    bool ok = true;
+    ok &= addPermitCidrV4(0x7F000000, 0xFF000000);  // 127.0.0.0/8   loopback
+    ok &= addPermitCidrV4(0x0A000000, 0xFF000000);  // 10.0.0.0/8    private
+    ok &= addPermitCidrV4(0xAC100000, 0xFFF00000);  // 172.16.0.0/12 private
+    ok &= addPermitCidrV4(0xC0A80000, 0xFFFF0000);  // 192.168.0.0/16 private (LAN/SSH peer)
+    ok &= addPermitCidrV4(0xA9FE0000, 0xFFFF0000);  // 169.254.0.0/16 link-local
+    ok &= addPermitRemotePortV4(53, IPPROTO_UDP);   // DNS
+    ok &= addPermitRemotePortV4(53, IPPROTO_TCP);   // DNS/TCP
+    ok &= addPermitRemotePortV4(67, IPPROTO_UDP);   // DHCP
+    ok &= addPermitRemotePortV4(123, IPPROTO_UDP);  // NTP
+    // Catch-all outbound block (weight 0, lowest -> everything above wins).
+    ok &= addV4(true, nullptr, 0, 0, L"NeuralGuard default-deny (outbound v4)");
+    return ok;
+}
+
 int Enforcer::countRules() {
     int n = 0;
     for (const GUID& layer : kLayers) n += CountOurFiltersInLayer((HANDLE)engine_, layer);

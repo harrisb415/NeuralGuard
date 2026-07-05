@@ -42,6 +42,8 @@ void PrintUsage() {
         "  ngctl status                Show installed NeuralGuard filter count.\n"
         "  ngctl block <ipv4> [port]   Add a block filter for a remote IPv4[:port] (TCP).\n"
         "  ngctl allow <ipv4> [port]   Add a permit filter for a remote IPv4[:port] (TCP).\n"
+        "  ngctl enforce <seconds>     Default-deny outbound IPv4 for <seconds>, then\n"
+        "                              auto-revert (Tier-0 exempt; inbound untouched).\n"
         "  ngctl -h | --help | /?      This help.\n\n"
         "Requires an elevated (Administrator) prompt.\n");
 }
@@ -97,6 +99,30 @@ int main(int argc, char** argv) {
         ng::Enforcer enf;
         if (!enf.open()) return 1;
         printf("NeuralGuard filters installed: %d\n", enf.countRules());
+        return 0;
+    }
+    if (strcmp(cmd, "enforce") == 0) {
+        // Mandatory duration = a dead-man switch: enforcement always auto-reverts,
+        // so an unattended test can never leave the machine stuck blocked.
+        int secs = (argc >= 3) ? atoi(argv[2]) : 0;
+        if (secs <= 0) {
+            fprintf(stderr, "usage: ngctl enforce <seconds>  (duration required; auto-reverts)\n");
+            return 2;
+        }
+        ng::Enforcer enf;
+        if (!enf.open()) return 1;
+        if (!enf.enableDefaultDeny()) {
+            fprintf(stderr, "enforce failed; reverting.\n");
+            enf.panic();
+            return 1;
+        }
+        printf("ENFORCE: default-deny outbound IPv4 ON (%d filters). "
+               "Tier-0 exempt; inbound untouched.\n", enf.countRules());
+        printf("Auto-reverting in %d s...\n", secs);
+        fflush(stdout);
+        Sleep((DWORD)secs * 1000);
+        int n = enf.panic();
+        printf("Reverted (removed %d filter(s)). Failing open.\n", n);
         return 0;
     }
     if (strcmp(cmd, "block") == 0) return Rule(argc, argv, true);
