@@ -30,11 +30,13 @@ add_library(ngcore STATIC
   src/core/signer.cpp
   src/core/identity.cpp
   src/core/dns.cpp
-  src/core/habit.cpp)
+  src/core/habit.cpp
+  src/core/enforcer.cpp)
 target_include_directories(ngcore PUBLIC src)
 target_compile_definitions(ngcore PUBLIC ${NG_DEFS})
 target_compile_options(ngcore PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
-target_link_libraries(ngcore PUBLIC sqlite3 bcrypt crypt32 wintrust tdh advapi32 ws2_32)
+# fwpuclnt = WFP API; uuid = predefined FWPM_LAYER_*/CONDITION_* GUIDs.
+target_link_libraries(ngcore PUBLIC sqlite3 bcrypt crypt32 wintrust tdh advapi32 ws2_32 fwpuclnt uuid)
 
 # --- ngmon (Phase 0): WFP net-event printer ---------------------------------
 add_executable(ngmon src/ngmon/main.cpp)
@@ -48,3 +50,9 @@ add_executable(ngd src/ngd/main.cpp src/ngd/recorder.cpp)
 target_compile_definitions(ngd PRIVATE ${NG_DEFS})
 target_compile_options(ngd PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 target_link_libraries(ngd PRIVATE ngcore fwpuclnt ws2_32)
+
+# --- ngctl (Phase 2): firewall control (enforcement + panic) ----------------
+add_executable(ngctl src/ngctl/main.cpp)
+target_compile_definitions(ngctl PRIVATE ${NG_DEFS})
+target_compile_options(ngctl PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
+target_link_libraries(ngctl PRIVATE ngcore ws2_32)

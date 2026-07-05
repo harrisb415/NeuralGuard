@@ -88,6 +88,18 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
   the app's retry succeeds.
 - Watchdog + fail-open-on-death.
 
+**Progress:**
+- ✅ Enforcement primitive + **panic switch** (`ng::Enforcer`, `ngctl`). Creates
+  NeuralGuard's provider + a weight-`0xFFFF` sublayer (above Defender), adds
+  permit/block filters at the ALE connect layer, and `ngctl panic` enumerates and
+  deletes every NeuralGuard filter (then drops the sublayer) to fail open. Verified
+  on the VM: `block 1.1.1.1 443` refuses the connection, `panic` restores it; SSH
+  unaffected. No default-block yet — only explicit rules.
+- ⬜ Tier 0 always-exempt rules (loopback/DHCP/DNS/NTP) + auto-permit the learned
+  baseline + default-block the rest.
+- ⬜ Minimal `ngtray` + block-notify-retry.
+- ⬜ Watchdog + fail-open-on-death.
+
 **Gate to next phase:** a week of daily use on the physical box with near-zero false
 blocks and a manageable prompt rate.
 
