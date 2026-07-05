@@ -13,6 +13,8 @@
 // Requires an elevated (Administrator) prompt.
 
 #include "core/enforcer.h"
+#include "core/db.h"
+#include "core/util.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -44,6 +46,9 @@ void PrintUsage() {
         "  ngctl allow <ipv4> [port]   Add a permit filter for a remote IPv4[:port] (TCP).\n"
         "  ngctl enforce <seconds>     Default-deny outbound IPv4 for <seconds>, then\n"
         "                              auto-revert (Tier-0 exempt; inbound untouched).\n"
+        "  ngctl enforce-baseline <db> <seconds>\n"
+        "                              Permit every observed (app, port) from <db>, then\n"
+        "                              default-deny the rest for <seconds>, then revert.\n"
         "  ngctl -h | --help | /?      This help.\n\n"
         "Requires an elevated (Administrator) prompt.\n");
 }
@@ -123,6 +128,48 @@ int main(int argc, char** argv) {
         Sleep((DWORD)secs * 1000);
         int n = enf.panic();
         printf("Reverted (removed %d filter(s)). Failing open.\n", n);
+        return 0;
+    }
+    if (strcmp(cmd, "enforce-baseline") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "usage: ngctl enforce-baseline <db> <seconds>\n");
+            return 2;
+        }
+        const char* dbPath = argv[2];
+        int secs = atoi(argv[3]);
+        if (secs <= 0) { fprintf(stderr, "seconds must be > 0 (auto-reverts)\n"); return 2; }
+
+        ng::Db db;
+        if (!db.open(dbPath)) return 1;
+        ng::Enforcer enf;
+        if (!enf.open()) return 1;
+
+        // Permit each distinct (application, remote port) we've observed allowed.
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(db.handle(),
+            "SELECT DISTINCT pi.image_path, fe.protocol, fe.remote_port"
+            " FROM flow_events fe JOIN process_identity pi ON fe.image_id = pi.id"
+            " WHERE fe.remote_port > 0 AND pi.image_path LIKE '_:\\%'"
+            "   AND fe.verdict IN ('ALLOW','CAPALLOW');", -1, &s, nullptr);
+        int permits = 0;
+        while (sqlite3_step(s) == SQLITE_ROW) {
+            const char* path = (const char*)sqlite3_column_text(s, 0);
+            int proto = sqlite3_column_int(s, 1);
+            int port = sqlite3_column_int(s, 2);
+            if (path && enf.addPermitAppId(ng::util::Widen(path).c_str(),
+                                           (uint16_t)port, (uint8_t)proto))
+                ++permits;
+        }
+        sqlite3_finalize(s);
+
+        if (!enf.enableDefaultDeny()) { enf.panic(); return 1; }
+        printf("ENFORCE-BASELINE: %d app permits + default-deny (%d filters total).\n",
+               permits, enf.countRules());
+        printf("Auto-reverting in %d s...\n", secs);
+        fflush(stdout);
+        Sleep((DWORD)secs * 1000);
+        int n = enf.panic();
+        printf("Reverted (removed %d filter(s)).\n", n);
         return 0;
     }
     if (strcmp(cmd, "block") == 0) return Rule(argc, argv, true);

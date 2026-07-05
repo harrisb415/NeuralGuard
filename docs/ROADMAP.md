@@ -100,10 +100,15 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
   catch-all block (weight 0); inbound untouched so SSH can't be cut off. `ngctl
   enforce <seconds>` runs it with a mandatory auto-revert (dead-man switch). Verified:
   public outbound blocked while DNS + SSH keep working; clean revert.
-- ⬜ Auto-permit the learned `habits` baseline (translate habits → WFP permits), and
-  extend default-deny to IPv6.
+- ✅ Auto-permit the observed baseline — `Enforcer::addPermitAppId()` (ALE_APP_ID)
+  + `ngctl enforce-baseline <db> <seconds>`: permit every distinct observed
+  `(application, remote port)` from the DB, then default-deny the rest (auto-revert).
+  Verified against the live baseline (84 permits): known app+port flows, unobserved
+  is blocked, DNS/SSH keep working. Per-(app,port) granularity is the safe first cut.
+- ⬜ Extend default-deny to IPv6; per-destination/domain tightening.
 - ⬜ Minimal `ngtray` + block-notify-retry.
-- ⬜ Watchdog + fail-open-on-death.
+- ⬜ Watchdog + fail-open-on-death; persistent enforcement (service holds it, vs
+  the CLI dead-man switch used for testing).
 
 **Gate to next phase:** a week of daily use on the physical box with near-zero false
 blocks and a manageable prompt rate.

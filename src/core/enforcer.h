@@ -27,6 +27,11 @@ public:
     // to revert. Returns true on success.
     bool enableDefaultDeny();
 
+    // Permit a specific application (by its on-disk path) to make outbound IPv4
+    // connections, optionally restricted to a remote port / protocol (0 = any).
+    // Used to auto-permit the observed baseline before default-deny.
+    bool addPermitAppId(const wchar_t* dosPath, uint16_t port, uint8_t proto);
+
     int  countRules();   // NeuralGuard filters currently installed
 
     // Delete ALL NeuralGuard filters and our sublayer/provider. Returns the

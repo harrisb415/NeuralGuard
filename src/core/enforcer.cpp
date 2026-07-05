@@ -205,6 +205,36 @@ bool Enforcer::addPermitRemotePortV4(uint16_t port, uint8_t proto) {
     return addV4(false, c, 2, 15, L"NeuralGuard exempt (port)");
 }
 
+bool Enforcer::addPermitAppId(const wchar_t* dosPath, uint16_t port, uint8_t proto) {
+    FWP_BYTE_BLOB* appId = nullptr;
+    if (FwpmGetAppIdFromFileName0(dosPath, &appId) != ERROR_SUCCESS || !appId) return false;
+
+    FWPM_FILTER_CONDITION0 c[3]{};
+    UINT32 nc = 0;
+    c[nc].fieldKey = FWPM_CONDITION_ALE_APP_ID;
+    c[nc].matchType = FWP_MATCH_EQUAL;
+    c[nc].conditionValue.type = FWP_BYTE_BLOB_TYPE;
+    c[nc].conditionValue.byteBlob = appId;
+    ++nc;
+    if (proto) {
+        c[nc].fieldKey = FWPM_CONDITION_IP_PROTOCOL;
+        c[nc].matchType = FWP_MATCH_EQUAL;
+        c[nc].conditionValue.type = FWP_UINT8;
+        c[nc].conditionValue.uint8 = proto;
+        ++nc;
+    }
+    if (port) {
+        c[nc].fieldKey = FWPM_CONDITION_IP_REMOTE_PORT;
+        c[nc].matchType = FWP_MATCH_EQUAL;
+        c[nc].conditionValue.type = FWP_UINT16;
+        c[nc].conditionValue.uint16 = port;
+        ++nc;
+    }
+    bool ok = addV4(false, c, nc, 12, L"NeuralGuard baseline permit");
+    FwpmFreeMemory0((void**)&appId);
+    return ok;
+}
+
 bool Enforcer::enableDefaultDeny() {
     // Tier-0 always-exempt permits (weight 15, above the catch-all block).
     bool ok = true;
