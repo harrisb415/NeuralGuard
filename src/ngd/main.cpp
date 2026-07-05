@@ -16,6 +16,7 @@
 #include "core/dns.h"
 #include "core/habit.h"
 #include "core/identity.h"
+#include "core/util.h"
 #include "ngd/recorder.h"
 
 #include <windows.h>
@@ -47,6 +48,7 @@ void PrintUsage() {
         "                                (default ngpolicy.db). [seconds] auto-stops;\n"
         "                                otherwise runs until Ctrl+C.\n"
         "  ngd dump [db]                 Print the learned baseline + recent events.\n"
+        "  ngd digest [db]               A 'what's new' digest of the learned baseline.\n"
         "  ngd -h | --help | /?          Show this help.\n\n"
         "Recording requires an elevated (Administrator) prompt.\n");
 }
@@ -57,6 +59,71 @@ BOOL WINAPI CtrlHandler(DWORD type) {
         return TRUE;
     }
     return FALSE;
+}
+
+void DigestQuery(sqlite3* h, const char* title, const char* sql,
+                 const char* bindIso = nullptr) {
+    printf("\n%s\n", title);
+    sqlite3_stmt* s = nullptr;
+    if (sqlite3_prepare_v2(h, sql, -1, &s, nullptr) != SQLITE_OK) return;
+    if (bindIso) sqlite3_bind_text(s, 1, bindIso, -1, SQLITE_TRANSIENT);
+    int cols = sqlite3_column_count(s);
+    int rows = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        printf("  ");
+        for (int i = 0; i < cols; ++i) {
+            const char* t = (const char*)sqlite3_column_text(s, i);
+            printf("%s%s", i ? "  " : "", t ? t : "");
+        }
+        printf("\n");
+        ++rows;
+    }
+    if (!rows) printf("  (none)\n");
+    sqlite3_finalize(s);
+}
+
+// A "what's new" digest over the learned baseline - the Phase 3 report that
+// later feeds novelty scoring and the weekly summary. Read-only.
+int RunDigest(ng::Db& db) {
+    sqlite3* h = db.handle();
+
+    // ISO cutoff for "last 7 days" (ISO-8601 sorts chronologically, so a string
+    // compare avoids julianday choking on our 'Z'-suffixed timestamps).
+    FILETIME ft; GetSystemTimeAsFileTime(&ft);
+    ULARGE_INTEGER u; u.LowPart = ft.dwLowDateTime; u.HighPart = ft.dwHighDateTime;
+    u.QuadPart -= 7ULL * 24 * 3600 * 10000000ULL;
+    FILETIME cf; cf.dwLowDateTime = u.LowPart; cf.dwHighDateTime = u.HighPart;
+    std::string cutoff = ng::util::IsoTime(cf);
+
+    printf("=== NeuralGuard digest ===\n");
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(h,
+        "SELECT (SELECT count(*) FROM habits), (SELECT count(DISTINCT process_label) FROM habits),"
+        " (SELECT count(DISTINCT dest) FROM habits), (SELECT count(*) FROM flow_events);",
+        -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW)
+        printf("habits=%d  apps=%d  destinations=%d  events=%d\n",
+               sqlite3_column_int(s, 0), sqlite3_column_int(s, 1),
+               sqlite3_column_int(s, 2), sqlite3_column_int(s, 3));
+    sqlite3_finalize(s);
+
+    DigestQuery(h, "-- top talkers (by decayed count) --",
+        "SELECT round(count,1), process_label, dest||':'||remote_port FROM habits"
+        " ORDER BY count DESC LIMIT 10;");
+
+    DigestQuery(h, "-- new in the last 7 days --",
+        "SELECT process_label, dest||':'||remote_port, first_seen FROM habits"
+        " WHERE first_seen >= ? ORDER BY first_seen DESC LIMIT 15;", cutoff.c_str());
+
+    DigestQuery(h, "-- rare / one-off (count < 2) - the novel ones --",
+        "SELECT process_label, dest||':'||remote_port, last_seen FROM habits"
+        " WHERE count < 2 ORDER BY last_seen DESC LIMIT 15;");
+
+    DigestQuery(h, "-- chattiest apps (distinct destinations) --",
+        "SELECT count(DISTINCT dest), process_label FROM habits"
+        " GROUP BY process_label ORDER BY 1 DESC LIMIT 10;");
+
+    return 0;
 }
 
 int RunDump(ng::Db& db) {
@@ -137,7 +204,8 @@ int main(int argc, char** argv) {
     const char* mode = "record";
     const char* dbPath = "ngpolicy.db";
     int seconds = 0;  // 0 = run until Ctrl+C
-    if (argc >= 2 && (strcmp(argv[1], "dump") == 0 || strcmp(argv[1], "record") == 0)) {
+    if (argc >= 2 && (strcmp(argv[1], "dump") == 0 || strcmp(argv[1], "record") == 0 ||
+                      strcmp(argv[1], "digest") == 0)) {
         mode = argv[1];
         if (argc >= 3) dbPath = argv[2];
         if (argc >= 4 && strcmp(mode, "record") == 0) seconds = atoi(argv[3]);
@@ -159,7 +227,8 @@ int main(int argc, char** argv) {
     ng::Db db;
     if (!db.open(dbPath)) return 1;
 
-    if (!recording) return RunDump(db);
+    if (strcmp(mode, "dump") == 0) return RunDump(db);
+    if (strcmp(mode, "digest") == 0) return RunDigest(db);
 
     ng::IdentityResolver resolver(db);
     resolver.init();

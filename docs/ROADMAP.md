@@ -113,6 +113,16 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
 **Gate to next phase:** a week of daily use on the physical box with near-zero false
 blocks and a manageable prompt rate.
 
+**Progress:**
+- ✅ `ngd digest` — a "what's new" report over the baseline (totals, top talkers,
+  new-in-7-days, rare/one-off novel ones, chattiest apps). Also fixed a habit
+  noise bug it exposed: inbound peers' ephemeral remote ports created junk
+  one-off habits; habits now only record remote ports < 49152 (outbound service
+  ports).
+- ⬜ Novelty score (recency + time-of-day + fan-out) → auto-allow low-novelty.
+- ⬜ Nightly compaction (decay/evict/promote stable keys to explicit rules).
+- ⬜ Configurable autonomy levels + weekly digest delivery.
+
 ## Phase 3 — Habit scoring & autonomy
 
 **Goal:** fewer prompts, smarter defaults — still no ML.

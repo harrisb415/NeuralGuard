@@ -63,8 +63,11 @@ void Recorder::handleEvent(const void* evOpaque) {
     // ALE classify verdicts (not capability/other events) and require a real
     // remote endpoint + a resolved process, to approximate one obs per connection.
     const bool isClassify = (strcmp(verdict, "ALLOW") == 0 || strcmp(verdict, "DROP") == 0);
-    const bool realRemote = hasRPort && h->remotePort > 0 && !remote.empty() &&
-                            remote != "0.0.0.0" && remote != "::";
+    // Skip ephemeral remote ports (>= 49152): those are the peer's random port on
+    // an INBOUND connection, which would otherwise create one junk habit each. A
+    // habit is about an outbound *service* port.
+    const bool realRemote = hasRPort && h->remotePort > 0 && h->remotePort < 49152 &&
+                            !remote.empty() && remote != "0.0.0.0" && remote != "::";
     if (isClassify && realRemote && idn.id >= 0) {
         std::string dest = domain.empty() ? remote : domain;
         SYSTEMTIME st{}; FileTimeToSystemTime(&h->timeStamp, &st);
