@@ -36,8 +36,9 @@ std::wstring ExeDir() {
 
 // Run `ngctl <cmd>` elevated, keeping a console open so the output is visible.
 void RunCtl(const wchar_t* sub) {
-    std::wstring args = L"/k \"\"" + ExeDir() + L"\\ngctl.exe\" " + sub + L"\"";
-    ShellExecuteW(nullptr, L"runas", L"cmd.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    std::wstring dir = ExeDir();
+    std::wstring args = L"/k \"\"" + dir + L"\\ngctl.exe\" " + sub + L"\"";
+    ShellExecuteW(nullptr, L"runas", L"cmd.exe", args.c_str(), dir.c_str(), SW_SHOWNORMAL);
 }
 
 std::wstring Widen(const std::string& s) {

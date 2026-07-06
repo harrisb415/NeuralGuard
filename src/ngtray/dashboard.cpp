@@ -32,7 +32,9 @@ void RunElevated(const wchar_t* tool, const wchar_t* sub) {
     std::wstring dir = path; size_t i = dir.find_last_of(L"\\/");
     dir = (i == std::wstring::npos) ? L"." : dir.substr(0, i);
     std::wstring args = L"/k \"\"" + dir + L"\\" + tool + L"\" " + sub + L"\"";
-    ShellExecuteW(nullptr, L"runas", L"cmd.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    // Run with the exe's folder as CWD so a relative "ngpolicy.db" resolves to
+    // the same DB the dashboard reads (ExeDir\ngpolicy.db).
+    ShellExecuteW(nullptr, L"runas", L"cmd.exe", args.c_str(), dir.c_str(), SW_SHOWNORMAL);
 }
 
 std::wstring ExeDir() {
