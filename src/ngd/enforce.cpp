@@ -4,17 +4,19 @@
 #include "core/db.h"
 #include "core/dns.h"
 #include "core/enforcer.h"
+#include "core/habit.h"
 #include "core/identity.h"
 #include "core/prompt.h"
 #include "core/util.h"
 
 #include <cstdio>
+#include <cstring>
 
 namespace ng {
 namespace {
 
-void CALLBACK DropThunk(void* ctx, const FWPM_NET_EVENT5* ev) {
-    if (ctx && ev) static_cast<EnforceDaemon*>(ctx)->handleDrop(ev);
+void CALLBACK EventThunk(void* ctx, const FWPM_NET_EVENT5* ev) {
+    if (ctx && ev) static_cast<EnforceDaemon*>(ctx)->handleEvent(ev);
 }
 
 // A remote we should NOT prompt for: loopback/private/link-local/multicast, or
@@ -57,6 +59,69 @@ int EnforceDaemon::installBaseline() {
     }
     sqlite3_finalize(s);
     return permits;
+}
+
+// Every WFP event during enforcement: persist it (live feed + decision history)
+// and, if it's a novel public drop, kick off the prompt path.
+void EnforceDaemon::handleEvent(const void* evp) {
+    recordEvent(evp);
+    handleDrop(evp);
+}
+
+// Persist one event to flow_events and fold it into the learned baseline - the
+// same write the recorder does, so enforcement keeps learning and the dashboard
+// Live tab streams while enforcing.
+void EnforceDaemon::recordEvent(const void* evp) {
+    const FWPM_NET_EVENT5* ev = static_cast<const FWPM_NET_EVENT5*>(evp);
+    const FWPM_NET_EVENT_HEADER3* h = &ev->header;
+
+    const bool hasProto = (h->flags & FWPM_NET_EVENT_FLAG_IP_PROTOCOL_SET) != 0;
+    const bool hasLPort = (h->flags & FWPM_NET_EVENT_FLAG_LOCAL_PORT_SET) != 0;
+    const bool hasRPort = (h->flags & FWPM_NET_EVENT_FLAG_REMOTE_PORT_SET) != 0;
+
+    const char* verdict = ngwfp::TypeName(ev->type);
+    std::string ts     = util::IsoTime(h->timeStamp);
+    std::string local  = ngwfp::IpToStr(h, false);
+    std::string remote = ngwfp::IpToStr(h, true);
+    std::string app    = ngwfp::AppIdToStr(&h->appId);
+    std::string sid    = ngwfp::UserSid(h);
+
+    Identity idn = app.empty() ? Identity{} : id_.resolve(app);
+    std::string domain = remote.empty() ? "" : dns_.lookup(remote);
+
+    {
+        std::lock_guard<std::mutex> lk(db_.mutex());
+        sqlite3_stmt* ins = static_cast<sqlite3_stmt*>(insStmt_);
+        if (!ins) return;
+        sqlite3_reset(ins);
+        sqlite3_clear_bindings(ins);
+        bindText(ins, 1, ts);
+        bindText(ins, 2, verdict);
+        if (hasProto) sqlite3_bind_int(ins, 3, h->ipProtocol); else sqlite3_bind_null(ins, 3);
+        bindText(ins, 4, local);
+        if (hasLPort) sqlite3_bind_int(ins, 5, h->localPort); else sqlite3_bind_null(ins, 5);
+        bindText(ins, 6, remote);
+        if (hasRPort) sqlite3_bind_int(ins, 7, h->remotePort); else sqlite3_bind_null(ins, 7);
+        bindText(ins, 8, app);
+        bindText(ins, 9, sid);
+        if (idn.id >= 0) sqlite3_bind_int64(ins, 10, idn.id); else sqlite3_bind_null(ins, 10);
+        if (domain.empty()) sqlite3_bind_null(ins, 11); else bindText(ins, 11, domain);
+        sqlite3_step(ins);
+    }
+
+    const bool isClassify = (strcmp(verdict, "ALLOW") == 0 || strcmp(verdict, "DROP") == 0);
+    const bool isLoopback = remote.rfind("127.", 0) == 0 || remote == "::1";
+    const bool realRemote = hasRPort && h->remotePort > 0 && h->remotePort < 49152 &&
+                            !remote.empty() && remote != "0.0.0.0" && remote != "::" && !isLoopback;
+    if (isClassify && realRemote && idn.id >= 0) {
+        std::string dest = domain.empty() ? remote : domain;
+        SYSTEMTIME st{}; FileTimeToSystemTime(&h->timeStamp, &st);
+        std::string token = local + "|" + std::to_string(hasLPort ? h->localPort : 0) + "|" +
+                            remote + "|" + std::to_string(h->remotePort) + "|" +
+                            std::to_string(h->ipProtocol);
+        habits_.observe(idn.key, idn.label, dest, h->remotePort, h->ipProtocol,
+                        ts, util::UnixEpoch(h->timeStamp), st.wHour, st.wDayOfWeek, token);
+    }
 }
 
 void EnforceDaemon::handleDrop(const void* evp) {
@@ -120,6 +185,18 @@ void EnforceDaemon::stop() {
 
 bool EnforceDaemon::run(int seconds) {
     if (!enf_.open()) return false;
+
+    // Prepare the flow_events insert so enforcement also records the live feed.
+    sqlite3_stmt* ins = nullptr;
+    if (sqlite3_prepare_v2(db_.handle(),
+            "INSERT INTO flow_events"
+            "(ts_utc,verdict,protocol,local_addr,local_port,remote_addr,remote_port,image_path,user_sid,image_id,remote_domain)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?);", -1, &ins, nullptr) != SQLITE_OK) {
+        fprintf(stderr, "enforce: prepare insert failed: %s\n", sqlite3_errmsg(db_.handle()));
+        enf_.panic(); return false;
+    }
+    insStmt_ = ins;
+
     int permits = installBaseline();
     if (!enf_.enableDefaultDeny()) { enf_.panic(); return false; }
     printf("ngd enforce: %d stable permits + default-deny active.%s\n", permits,
@@ -151,7 +228,7 @@ bool EnforceDaemon::run(int seconds) {
     FWPM_NET_EVENT_SUBSCRIPTION0 sub{};
     sub.enumTemplate = nullptr;
     HANDLE subH = nullptr;
-    e = FwpmNetEventSubscribe4(engine, &sub, DropThunk, this, &subH);
+    e = FwpmNetEventSubscribe4(engine, &sub, EventThunk, this, &subH);
     if (e != ERROR_SUCCESS) {
         fprintf(stderr, "FwpmNetEventSubscribe4 (enforce) failed: 0x%08lX\n", e);
         FwpmEngineClose0(engine);
@@ -165,6 +242,11 @@ bool EnforceDaemon::run(int seconds) {
     if (worker_.joinable()) worker_.join();
     FwpmNetEventUnsubscribe0(engine, subH);
     FwpmEngineClose0(engine);
+    {
+        std::lock_guard<std::mutex> lk(db_.mutex());
+        sqlite3_finalize(ins);
+        insStmt_ = nullptr;
+    }
     int removed = enf_.panic();
     WSACleanup();
     printf("\nngd enforce: reverted (removed %d filters).\n", removed);

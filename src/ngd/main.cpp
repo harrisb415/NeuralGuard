@@ -395,7 +395,8 @@ int main(int argc, char** argv) {
         if (!dns.start())
             fprintf(stderr, "warning: DNS correlation disabled (ETW session failed)\n");
         ng::Enforcer enf;
-        ng::EnforceDaemon daemon(db, resolver, dns, enf);
+        ng::HabitTracker habits(db);
+        ng::EnforceDaemon daemon(db, resolver, dns, enf, habits);
         g_enforce = &daemon;
         SetConsoleCtrlHandler(CtrlHandler, TRUE);
         SetMode(db, "enforcing");

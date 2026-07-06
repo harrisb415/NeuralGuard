@@ -19,19 +19,23 @@ class Db;
 class IdentityResolver;
 class DnsWatcher;
 class Enforcer;
+class HabitTracker;
 
 class EnforceDaemon {
 public:
-    EnforceDaemon(Db& db, IdentityResolver& id, DnsWatcher& dns, Enforcer& enf)
-        : db_(db), id_(id), dns_(dns), enf_(enf) {}
+    EnforceDaemon(Db& db, IdentityResolver& id, DnsWatcher& dns, Enforcer& enf,
+                  HabitTracker& habits)
+        : db_(db), id_(id), dns_(dns), enf_(enf), habits_(habits) {}
 
     bool run(int seconds);   // install, subscribe, block until stop()/timeout, revert
     void stop();
 
-    void handleDrop(const void* ev);   // WFP callback; ev is const FWPM_NET_EVENT5*
+    void handleEvent(const void* ev);  // WFP callback: record every event, then dispatch
+    void handleDrop(const void* ev);   // novel-drop -> prompt path
 
 private:
     int  installBaseline();  // permit stable (app, port) pairs; returns count
+    void recordEvent(const void* ev);  // persist to flow_events + update habits (live feed)
     void worker();           // drains the prompt queue (blocking prompts here)
 
     struct Req { std::string devPath, dest; int port; };
@@ -40,6 +44,8 @@ private:
     IdentityResolver& id_;
     DnsWatcher& dns_;
     Enforcer& enf_;
+    HabitTracker& habits_;
+    void* insStmt_ = nullptr;   // sqlite3_stmt* for the flow_events insert
 
     std::mutex qmx_;
     std::condition_variable qcv_;
