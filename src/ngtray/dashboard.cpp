@@ -184,10 +184,18 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case WM_TIMER: UpdateStatus(); if (g_cur == TAB_LIVE) PollLive(); return 0;
         case WM_COMMAND:
             switch (LOWORD(w)) {
-                case IDB_ENFORCE: RunElevated(L"ngd.exe", L"enforce ngpolicy.db 0"); break;
-                case IDB_LEARN:   RunElevated(L"ngd.exe", L"record ngpolicy.db");    break;
-                case IDB_PANIC:   RunElevated(L"ngctl.exe", L"panic");               break;
-                case IDB_REFRESH: ShowTab(g_cur);                                    break;
+                case IDB_ENFORCE: {
+                    std::wstring s = L"enforce \"" + ExeDir() + L"\\ngpolicy.db\" 0";
+                    RunElevated(L"ngd.exe", s.c_str());
+                    break;
+                }
+                case IDB_LEARN: {
+                    std::wstring s = L"record \"" + ExeDir() + L"\\ngpolicy.db\"";
+                    RunElevated(L"ngd.exe", s.c_str());
+                    break;
+                }
+                case IDB_PANIC:   RunElevated(L"ngctl.exe", L"panic"); break;
+                case IDB_REFRESH: ShowTab(g_cur);                     break;
             }
             return 0;
         case WM_DESTROY: KillTimer(h, 1); g_dash = nullptr; return 0;
