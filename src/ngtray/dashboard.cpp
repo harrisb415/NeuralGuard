@@ -8,6 +8,7 @@
 
 #include <windows.h>
 #include <commctrl.h>
+#include <shellapi.h>
 
 #include <string>
 
@@ -15,11 +16,24 @@ namespace ng {
 namespace {
 
 enum { TAB_LIVE = 0, TAB_RULES = 1, TAB_HABITS = 2, TAB_COUNT = 3 };
+enum { IDB_ENFORCE = 100, IDB_LEARN, IDB_PANIC, IDB_REFRESH, IDB_COUNT_ = 4 };
+
+const wchar_t* kBtnLabel[IDB_COUNT_] = {L"Enforce", L"Learn", L"Panic", L"Refresh"};
 
 HWND g_dash = nullptr, g_tabs = nullptr, g_status = nullptr;
 HWND g_lv[TAB_COUNT] = {};
+HWND g_btn[IDB_COUNT_] = {};
 int  g_cur = 0;
 long long g_lastEventId = -1;   // for the live feed
+
+// Run `ngd`/`ngctl <sub>` elevated (one UAC prompt), console visible for output.
+void RunElevated(const wchar_t* tool, const wchar_t* sub) {
+    wchar_t path[MAX_PATH]; GetModuleFileNameW(nullptr, path, MAX_PATH);
+    std::wstring dir = path; size_t i = dir.find_last_of(L"\\/");
+    dir = (i == std::wstring::npos) ? L"." : dir.substr(0, i);
+    std::wstring args = L"/k \"\"" + dir + L"\\" + tool + L"\" " + sub + L"\"";
+    ShellExecuteW(nullptr, L"runas", L"cmd.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+}
 
 std::wstring ExeDir() {
     wchar_t p[MAX_PATH]; GetModuleFileNameW(nullptr, p, MAX_PATH);
@@ -139,8 +153,11 @@ void LayoutChildren() {
     SendMessageW(g_status, WM_SIZE, 0, 0);
     RECT sb; GetWindowRect(g_status, &sb);
     int sbh = sb.bottom - sb.top;
-    MoveWindow(g_tabs, 0, 0, rc.right, rc.bottom - sbh, TRUE);
-    RECT disp = {0, 0, rc.right, rc.bottom - sbh};
+    const int barH = 38, bw = 90, bh = 26, gap = 6;
+    int x = 8;
+    for (int i = 0; i < IDB_COUNT_; ++i) { MoveWindow(g_btn[i], x, 6, bw, bh, TRUE); x += bw + gap; }
+    MoveWindow(g_tabs, 0, barH, rc.right, rc.bottom - sbh - barH, TRUE);
+    RECT disp = {0, barH, rc.right, rc.bottom - sbh};
     TabCtrl_AdjustRect(g_tabs, FALSE, &disp);
     for (int i = 0; i < TAB_COUNT; ++i)
         MoveWindow(g_lv[i], disp.left, disp.top, disp.right - disp.left, disp.bottom - disp.top, TRUE);
@@ -163,6 +180,14 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         case WM_SIZE:  LayoutChildren(); return 0;
         case WM_TIMER: UpdateStatus(); if (g_cur == TAB_LIVE) PollLive(); return 0;
+        case WM_COMMAND:
+            switch (LOWORD(w)) {
+                case IDB_ENFORCE: RunElevated(L"ngd.exe", L"enforce ngpolicy.db 0"); break;
+                case IDB_LEARN:   RunElevated(L"ngd.exe", L"record ngpolicy.db");    break;
+                case IDB_PANIC:   RunElevated(L"ngctl.exe", L"panic");               break;
+                case IDB_REFRESH: ShowTab(g_cur);                                    break;
+            }
+            return 0;
         case WM_DESTROY: KillTimer(h, 1); g_dash = nullptr; return 0;
     }
     return DefWindowProcW(h, m, w, l);
@@ -199,6 +224,10 @@ void OpenDashboard(HINSTANCE hInst) {
     }
     g_dash = CreateWindowW(L"ngDashWnd", L"NeuralGuard", WS_OVERLAPPEDWINDOW,
                            CW_USEDEFAULT, CW_USEDEFAULT, 900, 620, nullptr, nullptr, hInst, nullptr);
+
+    for (int i = 0; i < IDB_COUNT_; ++i)
+        g_btn[i] = CreateWindowW(L"BUTTON", kBtnLabel[i], WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                                 0, 0, 0, 0, g_dash, (HMENU)(INT_PTR)(IDB_ENFORCE + i), hInst, nullptr);
 
     g_tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE,
                            0, 0, 0, 0, g_dash, nullptr, hInst, nullptr);

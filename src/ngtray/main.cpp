@@ -140,12 +140,13 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
 
 }  // namespace
 
-int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR pCmdLine, int) {
     // Single instance - don't stack tray icons.
     CreateMutexW(nullptr, TRUE, L"NeuralGuard_ngtray_singleton");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
 
     g_hInst = hInst;
+    const bool openDash = pCmdLine && wcsstr(pCmdLine, L"dashboard");
 
     WNDCLASSW wc{};
     wc.lpfnWndProc = WndProc;
@@ -173,6 +174,8 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // Listen for connection prompts from the privileged daemon.
     std::thread(PipeServer).detach();
+
+    if (openDash) ng::OpenDashboard(hInst);
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
