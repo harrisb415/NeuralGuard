@@ -59,11 +59,10 @@ target_compile_definitions(ngctl PRIVATE ${NG_DEFS})
 target_compile_options(ngctl PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 target_link_libraries(ngctl PRIVATE ngcore ws2_32)
 
-# --- ngtray (Phase 2c): system-tray UI + WebView2 dashboard -----------------
+# --- ngtray (Phase 2c): system-tray UI + native Win32 dashboard -------------
 add_executable(ngtray WIN32 src/ngtray/main.cpp src/ngtray/dashboard.cpp)
-target_include_directories(ngtray PRIVATE src third_party/webview2/include)
+target_include_directories(ngtray PRIVATE src)
 target_compile_definitions(ngtray PRIVATE ${NG_DEFS})
 target_compile_options(ngtray PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
-# ngcore = DB reads for the dashboard; WebView2LoaderStatic = the vendored loader.
-target_link_libraries(ngtray PRIVATE ngcore user32 shell32 ole32 oleaut32 version
-  "${CMAKE_SOURCE_DIR}/third_party/webview2/WebView2LoaderStatic.lib")
+# ngcore = DB reads for the dashboard; comctl32 = ListView/Tab/StatusBar.
+target_link_libraries(ngtray PRIVATE ngcore user32 shell32 comctl32)

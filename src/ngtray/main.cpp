@@ -13,7 +13,6 @@
 #include "ngtray/dashboard.h"
 
 #include <windows.h>
-#include <objbase.h>
 #include <shellapi.h>
 
 #include <string>
@@ -147,7 +146,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
 
     g_hInst = hInst;
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // WebView2 needs COM (STA)
 
     WNDCLASSW wc{};
     wc.lpfnWndProc = WndProc;

@@ -267,6 +267,17 @@ int RunCompact(ng::Db& db) {
     return 0;
 }
 
+// Publish ngd's current mode so the dashboard's status bar can show it live.
+void SetMode(ng::Db& db, const char* mode) {
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(db.handle(),
+        "INSERT INTO meta(k,v) VALUES('mode',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v;",
+        -1, &s, nullptr);
+    ng::bindText(s, 1, mode);
+    sqlite3_step(s);
+    sqlite3_finalize(s);
+}
+
 int RunDump(ng::Db& db) {
     sqlite3* h = db.handle();
     sqlite3_stmt* s = nullptr;
@@ -387,7 +398,9 @@ int main(int argc, char** argv) {
         ng::EnforceDaemon daemon(db, resolver, dns, enf);
         g_enforce = &daemon;
         SetConsoleCtrlHandler(CtrlHandler, TRUE);
+        SetMode(db, "enforcing");
         bool ok = daemon.run(seconds);
+        SetMode(db, "idle");
         dns.stop();
         return ok ? 0 : 1;
     }
@@ -404,6 +417,7 @@ int main(int argc, char** argv) {
 
     printf("ngd - recording to %s%s. Press Ctrl+C to stop.\n", dbPath,
            seconds > 0 ? " (timed)" : "");
+    SetMode(db, "learning");
     std::thread timer;
     if (seconds > 0)
         timer = std::thread([&recorder, seconds]() {
@@ -412,6 +426,7 @@ int main(int argc, char** argv) {
         });
     bool ok = recorder.run();
     if (timer.joinable()) timer.join();
+    SetMode(db, "idle");
     dns.stop();
     return ok ? 0 : 1;
 }

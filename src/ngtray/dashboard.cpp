@@ -1,213 +1,194 @@
+// NeuralGuard config dashboard - a native Win32 window (Common Controls), hosted
+// by the tray. No WebView2/HTML. Increment 1: tabbed shell with Rules + Habits
+// ListViews (read from the DB) and a status-bar live mode indicator (polls the
+// mode ngd writes to meta). More tabs (Live feed, Apps, History, Settings) and
+// rule editing land in following increments.
 #include "ngtray/dashboard.h"
 
 #include "core/db.h"
 
 #include <windows.h>
-#include <shellapi.h>
-#include <wrl.h>
-#include "WebView2.h"
+#include <commctrl.h>
 
 #include <string>
-
-using namespace Microsoft::WRL;
 
 namespace ng {
 namespace {
 
-HWND g_dashHwnd = nullptr;
-ComPtr<ICoreWebView2Controller> g_controller;
-ComPtr<ICoreWebView2> g_webview;
+enum { TAB_RULES = 0, TAB_HABITS = 1, TAB_COUNT = 2 };
+
+HWND g_dash = nullptr, g_tabs = nullptr, g_status = nullptr;
+HWND g_lv[TAB_COUNT] = {};
+int  g_cur = 0;
 
 std::wstring ExeDir() {
-    wchar_t path[MAX_PATH];
-    GetModuleFileNameW(nullptr, path, MAX_PATH);
-    std::wstring s = path;
-    size_t p = s.find_last_of(L"\\/");
-    return (p == std::wstring::npos) ? L"." : s.substr(0, p);
+    wchar_t p[MAX_PATH]; GetModuleFileNameW(nullptr, p, MAX_PATH);
+    std::wstring s = p; size_t i = s.find_last_of(L"\\/");
+    return (i == std::wstring::npos) ? L"." : s.substr(0, i);
 }
-
-std::wstring Widen(const std::string& s) {
-    if (s.empty()) return L"";
-    int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
+std::string DbPathU8() {
+    std::wstring w = ExeDir() + L"\\ngpolicy.db";
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    std::string s(n, 0);
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), s.data(), n, nullptr, nullptr);
+    return s;
+}
+std::wstring Widen(const char* s) {
+    if (!s) return L"";
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
     std::wstring w(n, 0);
-    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), w.data(), n);
+    MultiByteToWideChar(CP_UTF8, 0, s, -1, w.data(), n);
+    if (!w.empty() && w.back() == 0) w.pop_back();
     return w;
 }
 
-std::string JsonEsc(const char* s) {
-    std::string o;
-    for (const char* p = s ? s : ""; *p; ++p) {
-        if (*p == '"' || *p == '\\') { o += '\\'; o += *p; }
-        else if (*p == '\n') o += "\\n";
-        else o += *p;
-    }
-    return o;
+void AddCol(HWND lv, int i, const wchar_t* t, int cx) {
+    LVCOLUMNW c{}; c.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+    c.pszText = const_cast<LPWSTR>(t); c.cx = cx; c.iSubItem = i;
+    ListView_InsertColumn(lv, i, &c);
+}
+void SetCell(HWND lv, int row, int col, const char* u8) {
+    std::wstring w = Widen(u8);
+    LVITEMW it{}; it.mask = LVIF_TEXT; it.iItem = row; it.iSubItem = col;
+    it.pszText = const_cast<LPWSTR>(w.c_str());
+    if (col == 0) ListView_InsertItem(lv, &it); else ListView_SetItem(lv, &it);
 }
 
-// Read the learned baseline from the DB and return it as a JSON string for the UI.
-std::string BuildStatusJson() {
-    std::string db = std::string();
-    {
-        std::wstring p = ExeDir() + L"\\ngpolicy.db";
-        int n = WideCharToMultiByte(CP_UTF8, 0, p.c_str(), (int)p.size(), nullptr, 0, nullptr, nullptr);
-        db.resize(n);
-        WideCharToMultiByte(CP_UTF8, 0, p.c_str(), (int)p.size(), db.data(), n, nullptr, nullptr);
-    }
-    ng::Db d;
-    if (!d.open(db.c_str()))
-        return "{\"ok\":false,\"error\":\"no database\"}";
-    sqlite3* h = d.handle();
-
-    std::string json = "{\"ok\":true,";
+void FillHabits(HWND lv) {
+    ListView_DeleteAllItems(lv);
+    Db d; if (!d.open(DbPathU8().c_str())) return;
     sqlite3_stmt* s = nullptr;
-    sqlite3_prepare_v2(h, "SELECT (SELECT count(*) FROM habits),"
-                          " (SELECT count(DISTINCT process_label) FROM habits),"
-                          " (SELECT count(*) FROM flow_events);", -1, &s, nullptr);
-    if (sqlite3_step(s) == SQLITE_ROW)
-        json += "\"habits\":" + std::to_string(sqlite3_column_int(s, 0)) +
-                ",\"apps\":" + std::to_string(sqlite3_column_int(s, 1)) +
-                ",\"events\":" + std::to_string(sqlite3_column_int(s, 2)) + ",";
-    sqlite3_finalize(s);
-
-    json += "\"top\":[";
-    sqlite3_prepare_v2(h, "SELECT process_label, dest, remote_port, round(count,1) FROM habits"
-                          " ORDER BY count DESC LIMIT 20;", -1, &s, nullptr);
-    bool first = true;
+    sqlite3_prepare_v2(d.handle(),
+        "SELECT process_label, dest, remote_port, round(count,1) FROM habits"
+        " ORDER BY count DESC LIMIT 1000;", -1, &s, nullptr);
+    int row = 0;
     while (sqlite3_step(s) == SQLITE_ROW) {
-        if (!first) json += ",";
-        first = false;
-        json += "{\"app\":\"" + JsonEsc((const char*)sqlite3_column_text(s, 0)) +
-                "\",\"dest\":\"" + JsonEsc((const char*)sqlite3_column_text(s, 1)) +
-                "\",\"port\":" + std::to_string(sqlite3_column_int(s, 2)) +
-                ",\"count\":" + std::to_string(sqlite3_column_double(s, 3)) + "}";
+        SetCell(lv, row, 0, (const char*)sqlite3_column_text(s, 0));
+        SetCell(lv, row, 1, (const char*)sqlite3_column_text(s, 1));
+        SetCell(lv, row, 2, std::to_string(sqlite3_column_int(s, 2)).c_str());
+        SetCell(lv, row, 3, std::to_string(sqlite3_column_int(s, 3)).c_str());
+        ++row;
     }
     sqlite3_finalize(s);
-    json += "]}";
-    return json;
 }
 
-// Run `ngctl <sub>` or `ngd <sub>` elevated (UAC), visible so output shows.
-void RunElevated(const wchar_t* tool, const wchar_t* sub) {
-    std::wstring args = L"/k \"\"" + ExeDir() + L"\\" + tool + L"\" " + sub + L"\"";
-    ShellExecuteW(nullptr, L"runas", L"cmd.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
-}
-
-const wchar_t* kHtml = LR"HTML(<!doctype html><html><head><meta charset="utf-8">
-<style>
- body{font-family:Segoe UI,sans-serif;background:#0f1720;color:#e6edf3;margin:0;padding:16px}
- h1{font-size:18px;margin:0 0 4px} .sub{color:#8b98a5;font-size:12px;margin-bottom:12px}
- .row{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
- button{background:#1f6feb;color:#fff;border:0;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer}
- button.warn{background:#b62324} button.ghost{background:#21313f}
- .card{background:#161f2b;border:1px solid #21313f;border-radius:8px;padding:12px;margin-bottom:12px}
- table{width:100%;border-collapse:collapse;font-size:12px} td,th{text-align:left;padding:4px 6px;border-bottom:1px solid #21313f}
- th{color:#8b98a5;font-weight:600} .num{text-align:right;color:#9fd0ff}
- .stat{display:inline-block;margin-right:18px} .stat b{font-size:18px;color:#fff}
-</style></head><body>
- <h1>NeuralGuard</h1><div class="sub">habit-learning firewall - config dashboard</div>
- <div class="row">
-   <button onclick="send('enforce')">Enforce</button>
-   <button class="ghost" onclick="send('learn')">Learn</button>
-   <button class="warn" onclick="send('panic')">Panic</button>
-   <button class="ghost" onclick="send('refresh')">Refresh</button>
- </div>
- <div class="card" id="stats">loading…</div>
- <div class="card"><table id="top"><thead><tr><th>app</th><th>destination</th><th class="num">port</th><th class="num">count</th></tr></thead><tbody></tbody></table></div>
-<script>
- const wv = window.chrome.webview;
- function send(c){ wv.postMessage(c); }
- wv.addEventListener('message', e => {
-   let d; try{ d = JSON.parse(e.data); }catch{ return; }
-   if(!d.ok){ document.getElementById('stats').textContent = d.error||'error'; return; }
-   document.getElementById('stats').innerHTML =
-     '<span class="stat"><b>'+d.habits+'</b><br>habits</span>'+
-     '<span class="stat"><b>'+d.apps+'</b><br>apps</span>'+
-     '<span class="stat"><b>'+d.events+'</b><br>events</span>';
-   const tb = document.querySelector('#top tbody'); tb.innerHTML='';
-   (d.top||[]).forEach(r=>{ const tr=document.createElement('tr');
-     tr.innerHTML='<td>'+r.app+'</td><td>'+r.dest+'</td><td class="num">'+r.port+'</td><td class="num">'+r.count+'</td>'; tb.appendChild(tr); });
- });
- send('refresh');
-</script></body></html>)HTML";
-
-void OnMessage(const std::wstring& cmd) {
-    if (cmd == L"refresh") {
-        if (g_webview) g_webview->PostWebMessageAsString(Widen(BuildStatusJson()).c_str());
-    } else if (cmd == L"panic") {
-        RunElevated(L"ngctl.exe", L"panic");
-    } else if (cmd == L"enforce") {
-        RunElevated(L"ngd.exe", L"enforce ngpolicy.db 0");
-    } else if (cmd == L"learn") {
-        RunElevated(L"ngd.exe", L"record ngpolicy.db");
+void FillRules(HWND lv) {
+    ListView_DeleteAllItems(lv);
+    Db d; if (!d.open(DbPathU8().c_str())) return;
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(d.handle(),
+        "SELECT pi.image_path, fe.remote_port,"
+        " COUNT(DISTINCT fe.local_port || '|' || fe.remote_addr) AS c"
+        " FROM flow_events fe JOIN process_identity pi ON fe.image_id = pi.id"
+        " WHERE fe.remote_port > 0 AND fe.remote_port < 49152 AND pi.image_path LIKE '_:\\%'"
+        "   AND fe.verdict IN ('ALLOW','CAPALLOW')"
+        " GROUP BY pi.image_path, fe.remote_port HAVING c >= 3 ORDER BY c DESC;", -1, &s, nullptr);
+    int row = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        SetCell(lv, row, 0, (const char*)sqlite3_column_text(s, 0));
+        SetCell(lv, row, 1, std::to_string(sqlite3_column_int(s, 1)).c_str());
+        SetCell(lv, row, 2, std::to_string(sqlite3_column_int(s, 2)).c_str());
+        ++row;
     }
+    sqlite3_finalize(s);
 }
 
-void InitWebView(HWND hwnd) {
-    std::wstring dataDir = ExeDir() + L"\\wv2data";
-    CreateCoreWebView2EnvironmentWithOptions(nullptr, dataDir.c_str(), nullptr,
-        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-            [hwnd](HRESULT, ICoreWebView2Environment* env) -> HRESULT {
-                env->CreateCoreWebView2Controller(hwnd,
-                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                        [hwnd](HRESULT, ICoreWebView2Controller* controller) -> HRESULT {
-                            if (!controller) return S_OK;
-                            g_controller = controller;
-                            controller->get_CoreWebView2(&g_webview);
-                            RECT rc; GetClientRect(hwnd, &rc);
-                            controller->put_Bounds(rc);
-                            EventRegistrationToken tok;
-                            g_webview->add_WebMessageReceived(
-                                Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-                                        LPWSTR raw = nullptr;
-                                        if (SUCCEEDED(args->TryGetWebMessageAsString(&raw)) && raw) {
-                                            OnMessage(raw);
-                                            CoTaskMemFree(raw);
-                                        }
-                                        return S_OK;
-                                    }).Get(), &tok);
-                            g_webview->NavigateToString(kHtml);
-                            return S_OK;
-                        }).Get());
-                return S_OK;
-            }).Get());
+std::wstring ReadMode() {
+    Db d; if (!d.open(DbPathU8().c_str())) return L"unknown";
+    sqlite3_stmt* s = nullptr; std::wstring m = L"idle";
+    sqlite3_prepare_v2(d.handle(), "SELECT v FROM meta WHERE k='mode';", -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW) m = Widen((const char*)sqlite3_column_text(s, 0));
+    sqlite3_finalize(s);
+    return m;
 }
 
-LRESULT CALLBACK DashProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
-    switch (msg) {
-        case WM_SIZE:
-            if (g_controller) { RECT rc; GetClientRect(h, &rc); g_controller->put_Bounds(rc); }
+void UpdateStatus() {
+    std::wstring t = L"  Mode:  " + ReadMode();
+    SendMessageW(g_status, SB_SETTEXTW, 0, (LPARAM)t.c_str());
+}
+
+void LayoutChildren() {
+    RECT rc; GetClientRect(g_dash, &rc);
+    SendMessageW(g_status, WM_SIZE, 0, 0);
+    RECT sb; GetWindowRect(g_status, &sb);
+    int sbh = sb.bottom - sb.top;
+    MoveWindow(g_tabs, 0, 0, rc.right, rc.bottom - sbh, TRUE);
+    RECT disp = {0, 0, rc.right, rc.bottom - sbh};
+    TabCtrl_AdjustRect(g_tabs, FALSE, &disp);
+    for (int i = 0; i < TAB_COUNT; ++i)
+        MoveWindow(g_lv[i], disp.left, disp.top, disp.right - disp.left, disp.bottom - disp.top, TRUE);
+}
+
+void ShowTab(int i) {
+    g_cur = i;
+    for (int k = 0; k < TAB_COUNT; ++k) ShowWindow(g_lv[k], k == i ? SW_SHOW : SW_HIDE);
+    if (i == TAB_RULES) FillRules(g_lv[TAB_RULES]);
+    else                FillHabits(g_lv[TAB_HABITS]);
+}
+
+LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    switch (m) {
+        case WM_NOTIFY: {
+            LPNMHDR n = (LPNMHDR)l;
+            if (n->hwndFrom == g_tabs && n->code == TCN_SELCHANGE) ShowTab(TabCtrl_GetCurSel(g_tabs));
             return 0;
-        case WM_DESTROY:
-            if (g_controller) g_controller->Close();
-            g_webview.Reset();
-            g_controller.Reset();
-            g_dashHwnd = nullptr;
-            return 0;
+        }
+        case WM_SIZE:  LayoutChildren(); return 0;
+        case WM_TIMER: UpdateStatus();   return 0;
+        case WM_DESTROY: KillTimer(h, 1); g_dash = nullptr; return 0;
     }
-    return DefWindowProcW(h, msg, w, l);
+    return DefWindowProcW(h, m, w, l);
 }
 
 }  // namespace
 
 void OpenDashboard(HINSTANCE hInst) {
-    if (g_dashHwnd) { SetForegroundWindow(g_dashHwnd); return; }
+    if (g_dash) { SetForegroundWindow(g_dash); return; }
 
-    static bool registered = false;
-    if (!registered) {
+    INITCOMMONCONTROLSEX ic{sizeof(ic), ICC_TAB_CLASSES | ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES};
+    InitCommonControlsEx(&ic);
+
+    static bool reg = false;
+    if (!reg) {
         WNDCLASSW wc{};
-        wc.lpfnWndProc = DashProc;
+        wc.lpfnWndProc = Proc;
         wc.hInstance = hInst;
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
         wc.lpszClassName = L"ngDashWnd";
         RegisterClassW(&wc);
-        registered = true;
+        reg = true;
     }
-    g_dashHwnd = CreateWindowW(L"ngDashWnd", L"NeuralGuard", WS_OVERLAPPEDWINDOW,
-                               CW_USEDEFAULT, CW_USEDEFAULT, 760, 640,
-                               nullptr, nullptr, hInst, nullptr);
-    ShowWindow(g_dashHwnd, SW_SHOW);
-    InitWebView(g_dashHwnd);
+    g_dash = CreateWindowW(L"ngDashWnd", L"NeuralGuard", WS_OVERLAPPEDWINDOW,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 840, 600, nullptr, nullptr, hInst, nullptr);
+
+    g_tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE,
+                           0, 0, 0, 0, g_dash, nullptr, hInst, nullptr);
+    TCITEMW ti{}; ti.mask = TCIF_TEXT;
+    ti.pszText = const_cast<LPWSTR>(L"Rules");  TabCtrl_InsertItem(g_tabs, TAB_RULES, &ti);
+    ti.pszText = const_cast<LPWSTR>(L"Habits"); TabCtrl_InsertItem(g_tabs, TAB_HABITS, &ti);
+
+    DWORD lvStyle = WS_CHILD | LVS_REPORT | LVS_SHOWSELALWAYS;
+    for (int i = 0; i < TAB_COUNT; ++i) {
+        g_lv[i] = CreateWindowW(WC_LISTVIEWW, L"", lvStyle, 0, 0, 0, 0, g_dash, nullptr, hInst, nullptr);
+        ListView_SetExtendedListViewStyle(g_lv[i], LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES);
+    }
+    AddCol(g_lv[TAB_RULES], 0, L"Application (permitted)", 420);
+    AddCol(g_lv[TAB_RULES], 1, L"Port", 70);
+    AddCol(g_lv[TAB_RULES], 2, L"Connections", 110);
+    AddCol(g_lv[TAB_HABITS], 0, L"Application", 240);
+    AddCol(g_lv[TAB_HABITS], 1, L"Destination", 320);
+    AddCol(g_lv[TAB_HABITS], 2, L"Port", 70);
+    AddCol(g_lv[TAB_HABITS], 3, L"Count", 70);
+
+    g_status = CreateWindowW(STATUSCLASSNAMEW, L"", WS_CHILD | WS_VISIBLE,
+                             0, 0, 0, 0, g_dash, nullptr, hInst, nullptr);
+
+    LayoutChildren();
+    ShowTab(TAB_RULES);
+    UpdateStatus();
+    SetTimer(g_dash, 1, 2000, nullptr);
+    ShowWindow(g_dash, SW_SHOW);
 }
 
 }  // namespace ng
