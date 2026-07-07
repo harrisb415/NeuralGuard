@@ -118,15 +118,23 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
   thread; Allow → permit (retry succeeds), else stays blocked; auto-reverts on
   stop. Verified headless (baseline permits / novel blocked / drop-detected /
   reverted); live toast click-through is interactive.
-- ◐ **Config UI (native Win32)** — WebView2 removed (user chose a native C++ app).
-  `ngtray` → Dashboard opens a native window (Common Controls): tab control +
-  ListViews (Rules, Habits from the DB) + a status-bar **live mode indicator**
-  (ngd publishes `meta.mode` = learning/enforcing/idle; dashboard polls it). All
-  panels/capabilities were requested — building in increments:
-  - ⬜ Live connection feed · rule editing · Per-app view · Decision history tabs
-  - ⬜ Settings/autonomy tab · export-import · block rules · search · timed allow
-  - ⬜ Windows service + watchdog + fail-open-on-death
-- ⬜ Watchdog + fail-open-on-death; persistent enforcement service.
+- ✅ **Config UI (native Win32)** — WebView2 removed (user chose a native C++ app).
+  `ngtray` → Dashboard is a native window (Common Controls): tab control +
+  ListViews + status-bar **live mode indicator** (ngd publishes `meta.mode`).
+  Double-click the tray icon opens it; the tray runs elevated
+  (requireAdministrator) so its actions don't each fire a UAC prompt. All
+  requested panels/capabilities shipped:
+  - ✅ Live connection feed · **editable rules** (right-click add/delete, applied
+    live) · Per-app view · Decision-history tabs
+  - ✅ Settings/**autonomy** tab (prompt / auto-allow-known / auto-allow-all) ·
+    export-import · block rules · search/filter · timed-allow
+  - ✅ **Windows service + watchdog + fail-open-on-death**
+- ✅ **Windows service (`ngd install/uninstall/service-run`)** — runs enforcement
+  as LocalSystem at boot (zero UAC), SCM restart-on-crash watchdog, and a DYNAMIC
+  WFP session so a crashed enforcer leaves no filters (fail-open-on-death).
+  Editable rules apply live via a `rules` table + `meta.rules_gen` poll; timed
+  allows expire via `expires_epoch`. Dashboard Settings tab has Install/Remove
+  buttons. Verified end-to-end on the VM.
 
 **Gate to next phase:** a week of daily use on the physical box with near-zero false
 blocks and a manageable prompt rate.
