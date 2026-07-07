@@ -164,11 +164,15 @@ void EnforceDaemon::worker() {
         }
         Identity idn = id_.resolve(req.devPath);
         std::string label = idn.label.empty() ? req.devPath : idn.label;
-        char d = PromptTray(label, req.dest, req.port);   // blocks on the user
+        // Autonomy: skip the prompt when the policy says to auto-allow.
+        int autonomy = readAutonomy();
+        bool autoAllow = autonomy >= 2 || (autonomy == 1 && appKnown(idn.key));
+        char d = autoAllow ? 'A' : PromptTray(label, req.dest, req.port);   // may block on the user
         if (d == 'A' || d == 'O') {
             if (!idn.path.empty())
                 enf_.addPermitAppId(util::Widen(idn.path).c_str(), (uint16_t)req.port, IPPROTO_TCP);
-            fprintf(stderr, "[enforce] ALLOW  %s -> %s:%d\n", label.c_str(), req.dest.c_str(), req.port);
+            fprintf(stderr, "[enforce] %s  %s -> %s:%d\n", autoAllow ? "AUTO-ALLOW" : "ALLOW",
+                    label.c_str(), req.dest.c_str(), req.port);
         } else if (d == 0) {
             fprintf(stderr, "[enforce] (tray unreachable) %s -> %s:%d stays blocked\n",
                     label.c_str(), req.dest.c_str(), req.port);
@@ -185,6 +189,26 @@ long long EnforceDaemon::readRulesGen() {
     if (sqlite3_step(s) == SQLITE_ROW) g = sqlite3_column_int64(s, 0);
     sqlite3_finalize(s);
     return g;
+}
+
+int EnforceDaemon::readAutonomy() {
+    std::lock_guard<std::mutex> lk(db_.mutex());
+    sqlite3_stmt* s = nullptr; int v = 0;
+    sqlite3_prepare_v2(db_.handle(), "SELECT v FROM meta WHERE k='autonomy';", -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW) v = sqlite3_column_int(s, 0);
+    sqlite3_finalize(s);
+    return v;
+}
+
+bool EnforceDaemon::appKnown(const std::string& key) {
+    if (key.empty()) return false;
+    std::lock_guard<std::mutex> lk(db_.mutex());
+    sqlite3_stmt* s = nullptr; int n = 0;
+    sqlite3_prepare_v2(db_.handle(), "SELECT count(*) FROM habits WHERE process_key=?;", -1, &s, nullptr);
+    bindText(s, 1, key);
+    if (sqlite3_step(s) == SQLITE_ROW) n = sqlite3_column_int(s, 0);
+    sqlite3_finalize(s);
+    return n > 0;
 }
 
 // Read enabled, unexpired rows from the rules table and install each as a WFP

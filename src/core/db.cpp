@@ -61,7 +61,10 @@ const char* kSchema =
     "  expires_epoch REAL,"            // NULL = permanent; timed-allow sets a future epoch
     "  note          TEXT,"
     "  created_at    TEXT);"
-    "INSERT OR IGNORE INTO meta(k,v) VALUES('rules_gen','0');";
+    "INSERT OR IGNORE INTO meta(k,v) VALUES('rules_gen','0');"
+    // Autonomy: 0 = prompt on every novel connection, 1 = auto-allow when the
+    // app is already known (has a learned habit), 2 = auto-allow everything.
+    "INSERT OR IGNORE INTO meta(k,v) VALUES('autonomy','0');";
 }  // namespace
 
 bool Db::open(const char* path) {

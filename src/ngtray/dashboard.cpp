@@ -20,11 +20,13 @@
 namespace ng {
 namespace {
 
-enum { TAB_LIVE = 0, TAB_RULES = 1, TAB_HABITS = 2, TAB_APPS = 3, TAB_HISTORY = 4, TAB_COUNT = 5 };
+enum { TAB_LIVE = 0, TAB_RULES = 1, TAB_HABITS = 2, TAB_APPS = 3, TAB_HISTORY = 4,
+       TAB_SETTINGS = 5, TAB_COUNT = 6 };
 enum { IDB_ENFORCE = 100, IDB_LEARN, IDB_STOP, IDB_PANIC, IDB_REFRESH, IDB_COUNT_ = 5 };
 enum { IDM_BLOCK_DEST = 300, IDM_ALLOW_DEST, IDM_ALLOW_APP, IDM_BLOCK_APP,
        IDM_ALLOW_DEST_1H, IDM_DEL_RULE };
-enum { IDC_SEARCH = 400, IDB_EXPORT = 401, IDB_IMPORT = 402 };
+enum { IDC_SEARCH = 400, IDB_EXPORT = 401, IDB_IMPORT = 402,
+       IDC_AUTO0 = 410, IDC_AUTO1 = 411, IDC_AUTO2 = 412 };
 constexpr UINT WM_APP_LOG = WM_APP + 7;
 
 const wchar_t* kBtnLabel[IDB_COUNT_] = {L"Enforce", L"Learn", L"Stop", L"Panic", L"Refresh"};
@@ -33,6 +35,7 @@ HWND g_dash = nullptr, g_tabs = nullptr, g_status = nullptr, g_log = nullptr;
 HWND g_lv[TAB_COUNT] = {};
 HWND g_btn[IDB_COUNT_] = {};
 HWND g_search = nullptr, g_export = nullptr, g_import = nullptr;
+HWND g_autoLabel = nullptr, g_autoRadio[3] = {};
 int  g_cur = 0;
 long long g_lastEventId = -1;
 long long g_ctxParam = 0;   // DB id of the row the context menu was opened on
@@ -434,6 +437,24 @@ void PollLive() {
     for (int n = ListView_GetItemCount(lv); n > 500; --n) ListView_DeleteItem(lv, n - 1);
 }
 
+int ReadAutonomy() {
+    Db d; if (!d.open(DbPathU8().c_str())) return 0;
+    sqlite3_stmt* s = nullptr; int v = 0;
+    sqlite3_prepare_v2(d.handle(), "SELECT v FROM meta WHERE k='autonomy';", -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW) v = sqlite3_column_int(s, 0);
+    sqlite3_finalize(s);
+    return v;
+}
+void WriteAutonomy(int v) {
+    Db d; if (!d.open(DbPathU8().c_str())) return;
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(d.handle(),
+        "INSERT INTO meta(k,v) VALUES('autonomy',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v;",
+        -1, &s, nullptr);
+    bindText(s, 1, std::to_string(v).c_str());
+    sqlite3_step(s); sqlite3_finalize(s);
+}
+
 std::wstring ReadMode() {
     Db d; if (!d.open(DbPathU8().c_str())) return L"unknown";
     sqlite3_stmt* s = nullptr; std::wstring m = L"idle";
@@ -466,11 +487,25 @@ void LayoutChildren() {
     TabCtrl_AdjustRect(g_tabs, FALSE, &disp);
     for (int i = 0; i < TAB_COUNT; ++i)
         MoveWindow(g_lv[i], disp.left, disp.top, disp.right - disp.left, disp.bottom - disp.top, TRUE);
+    // Settings controls share the tab display rect.
+    MoveWindow(g_autoLabel, disp.left + 16, disp.top + 16, disp.right - disp.left - 32, 22, TRUE);
+    for (int k = 0; k < 3; ++k)
+        MoveWindow(g_autoRadio[k], disp.left + 24, disp.top + 52 + k * 34,
+                   disp.right - disp.left - 48, 26, TRUE);
 }
 
 void ShowTab(int i) {
     g_cur = i;
-    for (int k = 0; k < TAB_COUNT; ++k) ShowWindow(g_lv[k], k == i ? SW_SHOW : SW_HIDE);
+    bool settings = (i == TAB_SETTINGS);
+    for (int k = 0; k < TAB_COUNT; ++k) ShowWindow(g_lv[k], (k == i && !settings) ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_autoLabel, settings ? SW_SHOW : SW_HIDE);
+    for (int k = 0; k < 3; ++k) ShowWindow(g_autoRadio[k], settings ? SW_SHOW : SW_HIDE);
+    if (settings) {
+        int a = ReadAutonomy();
+        for (int k = 0; k < 3; ++k)
+            SendMessageW(g_autoRadio[k], BM_SETCHECK, k == a ? BST_CHECKED : BST_UNCHECKED, 0);
+        return;
+    }
     if (i == TAB_LIVE)         PollLive();
     else if (i == TAB_RULES)   FillRules(g_lv[TAB_RULES]);
     else if (i == TAB_HABITS)  FillHabits(g_lv[TAB_HABITS]);
@@ -543,6 +578,9 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 case IDM_DEL_RULE:      DelRule(g_ctxParam); FillRules(g_lv[TAB_RULES]);  break;
                 case IDB_EXPORT:        ExportRules(); break;
                 case IDB_IMPORT:        ImportRules(); FillRules(g_lv[TAB_RULES]); break;
+                case IDC_AUTO0: WriteAutonomy(0); AppendLog(L"[settings] autonomy: prompt on every new connection.\r\n"); break;
+                case IDC_AUTO1: WriteAutonomy(1); AppendLog(L"[settings] autonomy: auto-allow apps you already use.\r\n"); break;
+                case IDC_AUTO2: WriteAutonomy(2); AppendLog(L"[settings] autonomy: auto-allow everything (log only).\r\n"); break;
             }
             return 0;
         case WM_DESTROY: KillTimer(h, 1); g_dash = nullptr; return 0;
@@ -593,13 +631,25 @@ void OpenDashboard(HINSTANCE hInst) {
                                0, 0, 0, 0, g_dash, (HMENU)(INT_PTR)IDC_SEARCH, hInst, nullptr);
     SendMessageW(g_search, EM_SETCUEBANNER, TRUE, (LPARAM)L"Search…");
 
+    // Settings tab controls (hidden until the Settings tab is shown).
+    g_autoLabel = CreateWindowW(L"STATIC",
+        L"Autonomy — what NeuralGuard does when an app makes a new connection while enforcing:",
+        WS_CHILD, 0, 0, 0, 0, g_dash, nullptr, hInst, nullptr);
+    g_autoRadio[0] = CreateWindowW(L"BUTTON", L"Prompt me on every new connection",
+        WS_CHILD | BS_AUTORADIOBUTTON | WS_GROUP, 0, 0, 0, 0, g_dash, (HMENU)(INT_PTR)IDC_AUTO0, hInst, nullptr);
+    g_autoRadio[1] = CreateWindowW(L"BUTTON", L"Auto-allow apps I already use (prompt only for unknown apps)",
+        WS_CHILD | BS_AUTORADIOBUTTON, 0, 0, 0, 0, g_dash, (HMENU)(INT_PTR)IDC_AUTO1, hInst, nullptr);
+    g_autoRadio[2] = CreateWindowW(L"BUTTON", L"Auto-allow everything (log only, never prompt)",
+        WS_CHILD | BS_AUTORADIOBUTTON, 0, 0, 0, 0, g_dash, (HMENU)(INT_PTR)IDC_AUTO2, hInst, nullptr);
+
     g_tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, g_dash, nullptr, hInst, nullptr);
     TCITEMW ti{}; ti.mask = TCIF_TEXT;
     ti.pszText = const_cast<LPWSTR>(L"Live");    TabCtrl_InsertItem(g_tabs, TAB_LIVE, &ti);
     ti.pszText = const_cast<LPWSTR>(L"Rules");   TabCtrl_InsertItem(g_tabs, TAB_RULES, &ti);
     ti.pszText = const_cast<LPWSTR>(L"Habits");  TabCtrl_InsertItem(g_tabs, TAB_HABITS, &ti);
-    ti.pszText = const_cast<LPWSTR>(L"Per-app"); TabCtrl_InsertItem(g_tabs, TAB_APPS, &ti);
-    ti.pszText = const_cast<LPWSTR>(L"History"); TabCtrl_InsertItem(g_tabs, TAB_HISTORY, &ti);
+    ti.pszText = const_cast<LPWSTR>(L"Per-app");  TabCtrl_InsertItem(g_tabs, TAB_APPS, &ti);
+    ti.pszText = const_cast<LPWSTR>(L"History");  TabCtrl_InsertItem(g_tabs, TAB_HISTORY, &ti);
+    ti.pszText = const_cast<LPWSTR>(L"Settings"); TabCtrl_InsertItem(g_tabs, TAB_SETTINGS, &ti);
 
     DWORD lvStyle = WS_CHILD | LVS_REPORT | LVS_SHOWSELALWAYS;
     for (int i = 0; i < TAB_COUNT; ++i) {

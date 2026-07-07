@@ -395,6 +395,24 @@ int RunRuleAdd(ng::Db& db, const char* action, const char* ip, int port, int pro
     return 0;
 }
 
+int RunAutonomy(ng::Db& db, const char* levelOrNull) {
+    if (levelOrNull) {
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(db.handle(),
+            "INSERT INTO meta(k,v) VALUES('autonomy',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v;",
+            -1, &s, nullptr);
+        ng::bindText(s, 1, levelOrNull);
+        sqlite3_step(s); sqlite3_finalize(s);
+    }
+    sqlite3_stmt* s = nullptr; int v = 0;
+    sqlite3_prepare_v2(db.handle(), "SELECT v FROM meta WHERE k='autonomy';", -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW) v = sqlite3_column_int(s, 0);
+    sqlite3_finalize(s);
+    const char* names[] = {"prompt-everything", "auto-allow-known", "auto-allow-all"};
+    printf("autonomy = %d (%s)\n", v, (v >= 0 && v <= 2) ? names[v] : "?");
+    return 0;
+}
+
 int RunRuleDel(ng::Db& db, int id) {
     sqlite3_stmt* s = nullptr;
     sqlite3_prepare_v2(db.handle(), "DELETE FROM rules WHERE id=?;", -1, &s, nullptr);
@@ -424,7 +442,8 @@ int main(int argc, char** argv) {
                       strcmp(argv[1], "digest") == 0 || strcmp(argv[1], "compact") == 0 ||
                       strcmp(argv[1], "novelty") == 0 || strcmp(argv[1], "promote") == 0 ||
                       strcmp(argv[1], "enforce") == 0 || strcmp(argv[1], "rules") == 0 ||
-                      strcmp(argv[1], "rule-add") == 0 || strcmp(argv[1], "rule-del") == 0)) {
+                      strcmp(argv[1], "rule-add") == 0 || strcmp(argv[1], "rule-del") == 0 ||
+                      strcmp(argv[1], "autonomy") == 0)) {
         mode = argv[1];
         if (argc >= 3) dbPath = argv[2];
         if (argc >= 4 && (strcmp(mode, "record") == 0 || strcmp(mode, "enforce") == 0))
@@ -453,6 +472,7 @@ int main(int argc, char** argv) {
                           argc >= 6 ? atoi(argv[5]) : 0, argc >= 7 ? atoi(argv[6]) : 0,
                           argc >= 8 ? atoi(argv[7]) : 0);
     if (strcmp(mode, "rule-del") == 0) return RunRuleDel(db, argc >= 4 ? atoi(argv[3]) : 0);
+    if (strcmp(mode, "autonomy") == 0) return RunAutonomy(db, argc >= 4 ? argv[3] : nullptr);
     if (strcmp(mode, "dump") == 0) return RunDump(db);
     if (strcmp(mode, "digest") == 0) return RunDigest(db);
     if (strcmp(mode, "compact") == 0) return RunCompact(db);

@@ -38,6 +38,8 @@ private:
     int  applyRules();       // apply enabled, unexpired rows from the rules table
     void reapply();          // clear + reinstall baseline + default-deny + rules (live edit)
     long long readRulesGen();// meta('rules_gen'), bumped by the dashboard on edit
+    int  readAutonomy();     // meta('autonomy'): 0 prompt, 1 auto-allow known, 2 auto-allow all
+    bool appKnown(const std::string& key);  // app already has a learned habit
     void recordEvent(const void* ev);  // persist to flow_events + update habits (live feed)
     void worker();           // drains the prompt queue (blocking prompts here)
 
