@@ -235,6 +235,49 @@ bool Enforcer::addPermitAppId(const wchar_t* dosPath, uint16_t port, uint8_t pro
     return ok;
 }
 
+bool Enforcer::applyUserRule(const wchar_t* appPath, uint32_t remoteIpv4Host,
+                             uint16_t port, uint8_t proto, bool block) {
+    FWP_BYTE_BLOB* appId = nullptr;
+    if (appPath && *appPath &&
+        FwpmGetAppIdFromFileName0(appPath, &appId) != ERROR_SUCCESS)
+        appId = nullptr;
+
+    FWPM_FILTER_CONDITION0 c[4]{};
+    UINT32 nc = 0;
+    if (appId) {
+        c[nc].fieldKey = FWPM_CONDITION_ALE_APP_ID;
+        c[nc].matchType = FWP_MATCH_EQUAL;
+        c[nc].conditionValue.type = FWP_BYTE_BLOB_TYPE;
+        c[nc].conditionValue.byteBlob = appId; ++nc;
+    }
+    if (remoteIpv4Host) {
+        c[nc].fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
+        c[nc].matchType = FWP_MATCH_EQUAL;
+        c[nc].conditionValue.type = FWP_UINT32;
+        c[nc].conditionValue.uint32 = remoteIpv4Host; ++nc;
+    }
+    if (proto) {
+        c[nc].fieldKey = FWPM_CONDITION_IP_PROTOCOL;
+        c[nc].matchType = FWP_MATCH_EQUAL;
+        c[nc].conditionValue.type = FWP_UINT8;
+        c[nc].conditionValue.uint8 = proto; ++nc;
+    }
+    if (port) {
+        c[nc].fieldKey = FWPM_CONDITION_IP_REMOTE_PORT;
+        c[nc].matchType = FWP_MATCH_EQUAL;
+        c[nc].conditionValue.type = FWP_UINT16;
+        c[nc].conditionValue.uint16 = port; ++nc;
+    }
+    // WFP FWP_UINT8 filter weights are 0-15. User permit = 13, user block = 14
+    // (both above the baseline's 12, so a block beats a permit which beats the
+    // baseline); both stay below tier-0's 15 so loopback/DNS/the SSH subnet can
+    // never be blocked by a user rule.
+    bool ok = addV4(block, nc ? c : nullptr, nc, block ? 14 : 13,
+                    block ? L"NeuralGuard user block" : L"NeuralGuard user permit");
+    if (appId) FwpmFreeMemory0((void**)&appId);
+    return ok;
+}
+
 bool Enforcer::enableDefaultDeny() {
     // Tier-0 always-exempt permits (weight 15, above the catch-all block).
     bool ok = true;
@@ -258,10 +301,16 @@ int Enforcer::countRules() {
     return n;
 }
 
-int Enforcer::panic() {
+int Enforcer::clearFilters() {
     HANDLE eng = (HANDLE)engine_;
     int deleted = 0;
     for (const GUID& layer : kLayers) deleted += DeleteOurFiltersInLayer(eng, layer);
+    return deleted;
+}
+
+int Enforcer::panic() {
+    HANDLE eng = (HANDLE)engine_;
+    int deleted = clearFilters();
     // Now that no filters reference it, drop the sublayer (best effort).
     FwpmSubLayerDeleteByKey0(eng, &kSubLayerGuid);
     FwpmProviderDeleteByKey0(eng, &kProviderGuid);

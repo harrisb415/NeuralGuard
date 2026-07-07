@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace ng {
 namespace {
@@ -177,6 +178,74 @@ void EnforceDaemon::worker() {
     }
 }
 
+long long EnforceDaemon::readRulesGen() {
+    std::lock_guard<std::mutex> lk(db_.mutex());
+    sqlite3_stmt* s = nullptr; long long g = 0;
+    sqlite3_prepare_v2(db_.handle(), "SELECT v FROM meta WHERE k='rules_gen';", -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW) g = sqlite3_column_int64(s, 0);
+    sqlite3_finalize(s);
+    return g;
+}
+
+// Read enabled, unexpired rows from the rules table and install each as a WFP
+// filter. Rows are collected under the DB lock, then applied without it (the WFP
+// calls mustn't stall the recorder callback). Tracks the soonest future expiry
+// so the run loop can re-apply when a timed allow lapses.
+int EnforceDaemon::applyRules() {
+    struct R { bool block; std::string app; uint32_t ip; uint16_t port; uint8_t proto; };
+    std::vector<R> rules;
+    FILETIME ft; GetSystemTimeAsFileTime(&ft);
+    double now = util::UnixEpoch(ft);
+    nextExpiry_ = 0;
+    {
+        std::lock_guard<std::mutex> lk(db_.mutex());
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(db_.handle(),
+            "SELECT action, app_path, remote_addr, remote_port, protocol, expires_epoch"
+            " FROM rules WHERE enabled=1;", -1, &s, nullptr);
+        while (s && sqlite3_step(s) == SQLITE_ROW) {
+            const char* action = (const char*)sqlite3_column_text(s, 0);
+            const char* appPath = (const char*)sqlite3_column_text(s, 1);
+            const char* remote = (const char*)sqlite3_column_text(s, 2);
+            double expires = sqlite3_column_type(s, 5) == SQLITE_NULL ? 0 : sqlite3_column_double(s, 5);
+            if (expires > 0 && expires <= now) continue;   // lapsed timed allow -> skip
+            if (expires > now && (nextExpiry_ == 0 || expires < nextExpiry_)) nextExpiry_ = expires;
+            R r{};
+            r.block = action && strcmp(action, "block") == 0;
+            r.app = appPath ? appPath : "";
+            if (remote && *remote) {
+                in_addr a{};
+                if (InetPtonA(AF_INET, remote, &a) == 1) r.ip = ntohl(a.s_addr);
+            }
+            r.port = (uint16_t)sqlite3_column_int(s, 3);
+            r.proto = (uint8_t)sqlite3_column_int(s, 4);
+            rules.push_back(r);
+        }
+        sqlite3_finalize(s);
+    }
+    int n = 0;
+    for (const R& r : rules) {
+        std::wstring appW = r.app.empty() ? std::wstring() : util::Widen(r.app);
+        if (enf_.applyUserRule(appW.empty() ? nullptr : appW.c_str(), r.ip, r.port, r.proto, r.block))
+            ++n;
+    }
+    return n;
+}
+
+// Live re-apply after a rule edit or a timed-allow expiry: strip our filters
+// (keeping the sublayer) and reinstall baseline + default-deny + user rules.
+// The brief window between clear and reinstall fails open, which is the safe
+// direction. Session permits granted via prompts are re-derived from the
+// baseline where they became habits.
+void EnforceDaemon::reapply() {
+    enf_.clearFilters();
+    int permits = installBaseline();
+    enf_.enableDefaultDeny();
+    int nrules = applyRules();
+    printf("ngd enforce: re-applied (%d baseline permits, %d user rules).\n", permits, nrules);
+    fflush(stdout);
+}
+
 void EnforceDaemon::stop() {
     stop_ = true;
     qcv_.notify_all();
@@ -235,7 +304,21 @@ bool EnforceDaemon::run(int seconds) {
         stop(); if (worker_.joinable()) worker_.join(); enf_.panic(); return false;
     }
 
-    WaitForSingleObject((HANDLE)stopEvent_, seconds > 0 ? (DWORD)seconds * 1000 : INFINITE);
+    // Apply user-editable rules on top of the baseline, then watch for edits
+    // (meta.rules_gen bump) and timed-allow expiries, re-applying live.
+    int nrules = applyRules();
+    printf("ngd enforce: applied %d user rule(s).\n", nrules);
+    fflush(stdout);
+    long long gen = readRulesGen();
+    DWORD startTick = GetTickCount();
+    for (;;) {
+        if (WaitForSingleObject((HANDLE)stopEvent_, 2000) == WAIT_OBJECT_0) break;
+        if (seconds > 0 && GetTickCount() - startTick >= (DWORD)seconds * 1000) break;
+        FILETIME ft; GetSystemTimeAsFileTime(&ft);
+        bool expired = nextExpiry_ > 0 && util::UnixEpoch(ft) >= nextExpiry_;
+        long long g = readRulesGen();
+        if (g != gen || expired) { reapply(); gen = readRulesGen(); }
+    }
 
     stop_ = true;
     qcv_.notify_all();

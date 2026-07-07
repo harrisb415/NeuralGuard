@@ -342,6 +342,70 @@ int RunDump(ng::Db& db) {
     return 0;
 }
 
+void BumpRulesGen(sqlite3* h) {
+    sqlite3_exec(h, "UPDATE meta SET v = CAST(v AS INTEGER)+1 WHERE k='rules_gen';",
+                 nullptr, nullptr, nullptr);
+}
+
+int RunRules(ng::Db& db) {
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(db.handle(),
+        "SELECT id, action, COALESCE(app_path,'*'), COALESCE(remote_addr,'*'),"
+        " COALESCE(remote_port,0), COALESCE(protocol,0), enabled, COALESCE(expires_epoch,0)"
+        " FROM rules ORDER BY id;", -1, &s, nullptr);
+    printf("=== rules ===\n");
+    int n = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        double exp = sqlite3_column_double(s, 7);
+        printf("  #%-3d %-6s app=%s ip=%s port=%d proto=%d%s%s\n",
+               sqlite3_column_int(s, 0), sqlite3_column_text(s, 1),
+               sqlite3_column_text(s, 2), sqlite3_column_text(s, 3),
+               sqlite3_column_int(s, 4), sqlite3_column_int(s, 5),
+               sqlite3_column_int(s, 6) ? "" : " (disabled)",
+               exp > 0 ? " (timed)" : "");
+        ++n;
+    }
+    sqlite3_finalize(s);
+    if (!n) printf("  (none)\n");
+    return 0;
+}
+
+// rule-add <db> permit|block [ip] [port] [proto] [ttl_seconds]
+int RunRuleAdd(ng::Db& db, const char* action, const char* ip, int port, int proto, int ttl) {
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(db.handle(),
+        "INSERT INTO rules(action, remote_addr, remote_port, protocol, enabled, expires_epoch, created_at)"
+        " VALUES(?,?,?,?,1,?,datetime('now'));", -1, &s, nullptr);
+    ng::bindText(s, 1, action);
+    if (ip && *ip) ng::bindText(s, 2, ip); else sqlite3_bind_null(s, 2);
+    if (port) sqlite3_bind_int(s, 3, port); else sqlite3_bind_null(s, 3);
+    if (proto) sqlite3_bind_int(s, 4, proto); else sqlite3_bind_null(s, 4);
+    if (ttl > 0) {
+        FILETIME ft; GetSystemTimeAsFileTime(&ft);
+        sqlite3_bind_double(s, 5, ng::util::UnixEpoch(ft) + ttl);
+    } else {
+        sqlite3_bind_null(s, 5);
+    }
+    int rc = sqlite3_step(s);
+    sqlite3_finalize(s);
+    if (rc != SQLITE_DONE) { fprintf(stderr, "rule-add failed: %s\n", sqlite3_errmsg(db.handle())); return 1; }
+    BumpRulesGen(db.handle());
+    printf("rule added: %s ip=%s port=%d proto=%d%s\n", action, ip && *ip ? ip : "*",
+           port, proto, ttl > 0 ? " (timed)" : "");
+    return 0;
+}
+
+int RunRuleDel(ng::Db& db, int id) {
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(db.handle(), "DELETE FROM rules WHERE id=?;", -1, &s, nullptr);
+    sqlite3_bind_int(s, 1, id);
+    sqlite3_step(s);
+    sqlite3_finalize(s);
+    BumpRulesGen(db.handle());
+    printf("rule #%d deleted\n", id);
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -359,7 +423,8 @@ int main(int argc, char** argv) {
     if (argc >= 2 && (strcmp(argv[1], "dump") == 0 || strcmp(argv[1], "record") == 0 ||
                       strcmp(argv[1], "digest") == 0 || strcmp(argv[1], "compact") == 0 ||
                       strcmp(argv[1], "novelty") == 0 || strcmp(argv[1], "promote") == 0 ||
-                      strcmp(argv[1], "enforce") == 0)) {
+                      strcmp(argv[1], "enforce") == 0 || strcmp(argv[1], "rules") == 0 ||
+                      strcmp(argv[1], "rule-add") == 0 || strcmp(argv[1], "rule-del") == 0)) {
         mode = argv[1];
         if (argc >= 3) dbPath = argv[2];
         if (argc >= 4 && (strcmp(mode, "record") == 0 || strcmp(mode, "enforce") == 0))
@@ -382,6 +447,12 @@ int main(int argc, char** argv) {
     ng::Db db;
     if (!db.open(dbPath)) return 1;
 
+    if (strcmp(mode, "rules") == 0) return RunRules(db);
+    if (strcmp(mode, "rule-add") == 0)
+        return RunRuleAdd(db, argc >= 4 ? argv[3] : "block", argc >= 5 ? argv[4] : "",
+                          argc >= 6 ? atoi(argv[5]) : 0, argc >= 7 ? atoi(argv[6]) : 0,
+                          argc >= 8 ? atoi(argv[7]) : 0);
+    if (strcmp(mode, "rule-del") == 0) return RunRuleDel(db, argc >= 4 ? atoi(argv[3]) : 0);
     if (strcmp(mode, "dump") == 0) return RunDump(db);
     if (strcmp(mode, "digest") == 0) return RunDigest(db);
     if (strcmp(mode, "compact") == 0) return RunCompact(db);

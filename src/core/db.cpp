@@ -46,7 +46,22 @@ const char* kSchema =
     "  last_epoch    REAL,"   // unix seconds of last obs (for decay math)
     "  hour_hist     TEXT,"   // 24 comma-separated counts (UTC hour)
     "  dow_hist      TEXT,"   // 7 comma-separated counts (0=Sun)
-    "  UNIQUE(process_key, dest, remote_port, protocol));";
+    "  UNIQUE(process_key, dest, remote_port, protocol));"
+    // User-editable firewall rules. The dashboard writes these directly (no
+    // per-edit elevation) and ngd enforce reads + applies them as WFP filters,
+    // re-scanning when meta('rules_gen') changes so edits take effect live.
+    "CREATE TABLE IF NOT EXISTS rules("
+    "  id INTEGER PRIMARY KEY,"
+    "  action        TEXT NOT NULL,"   // 'permit' | 'block'
+    "  app_path      TEXT,"            // normalized C:\...  (NULL = any app)
+    "  remote_addr   TEXT,"            // IPv4 dotted (NULL = any)
+    "  remote_port   INTEGER,"         // NULL/0 = any
+    "  protocol      INTEGER,"         // NULL/0 = any (6 = TCP)
+    "  enabled       INTEGER NOT NULL DEFAULT 1,"
+    "  expires_epoch REAL,"            // NULL = permanent; timed-allow sets a future epoch
+    "  note          TEXT,"
+    "  created_at    TEXT);"
+    "INSERT OR IGNORE INTO meta(k,v) VALUES('rules_gen','0');";
 }  // namespace
 
 bool Db::open(const char* path) {

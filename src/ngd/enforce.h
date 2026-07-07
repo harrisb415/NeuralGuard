@@ -35,6 +35,9 @@ public:
 
 private:
     int  installBaseline();  // permit stable (app, port) pairs; returns count
+    int  applyRules();       // apply enabled, unexpired rows from the rules table
+    void reapply();          // clear + reinstall baseline + default-deny + rules (live edit)
+    long long readRulesGen();// meta('rules_gen'), bumped by the dashboard on edit
     void recordEvent(const void* ev);  // persist to flow_events + update habits (live feed)
     void worker();           // drains the prompt queue (blocking prompts here)
 
@@ -55,6 +58,7 @@ private:
     std::atomic<bool> stop_{false};
     void* stopEvent_ = nullptr;   // HANDLE
     std::thread worker_;
+    double nextExpiry_ = 0;       // soonest future timed-allow expiry (epoch), 0 = none
 };
 
 }  // namespace ng

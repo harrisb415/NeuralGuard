@@ -32,7 +32,17 @@ public:
     // Used to auto-permit the observed baseline before default-deny.
     bool addPermitAppId(const wchar_t* dosPath, uint16_t port, uint8_t proto);
 
+    // Apply one user-editable rule as a WFP filter. appPath (NULL/empty = any
+    // app), remoteIpv4Host (0 = any, host byte order), port (0 = any), proto
+    // (0 = any). block=false permits. User permits sit just above the baseline;
+    // user blocks sit above everything so an explicit block always wins.
+    bool applyUserRule(const wchar_t* appPath, uint32_t remoteIpv4Host,
+                       uint16_t port, uint8_t proto, bool block);
+
     int  countRules();   // NeuralGuard filters currently installed
+
+    // Delete just our filters (keep the sublayer/provider), for a live re-apply.
+    int  clearFilters();
 
     // Delete ALL NeuralGuard filters and our sublayer/provider. Returns the
     // number of filters removed. This is the panic / fail-open path.
