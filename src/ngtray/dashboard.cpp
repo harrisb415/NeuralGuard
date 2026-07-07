@@ -16,7 +16,7 @@
 namespace ng {
 namespace {
 
-enum { TAB_LIVE = 0, TAB_RULES = 1, TAB_HABITS = 2, TAB_COUNT = 3 };
+enum { TAB_LIVE = 0, TAB_RULES = 1, TAB_HABITS = 2, TAB_APPS = 3, TAB_HISTORY = 4, TAB_COUNT = 5 };
 enum { IDB_ENFORCE = 100, IDB_LEARN, IDB_STOP, IDB_PANIC, IDB_REFRESH, IDB_COUNT_ = 5 };
 enum { IDM_BLOCK_DEST = 300, IDM_ALLOW_DEST, IDM_ALLOW_APP, IDM_BLOCK_APP, IDM_DEL_RULE };
 constexpr UINT WM_APP_LOG = WM_APP + 7;
@@ -222,6 +222,54 @@ void FillHabits(HWND lv) {
     }
     sqlite3_finalize(s);
 }
+// Per-app rollup: one row per application, with distinct destinations, total
+// events, and how many were blocked.
+void FillApps(HWND lv) {
+    ListView_DeleteAllItems(lv);
+    Db d; if (!d.open(DbPathU8().c_str())) return;
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(d.handle(),
+        "SELECT COALESCE(pi.signer, pi.image_path, fe.image_path) app,"
+        " COUNT(DISTINCT fe.remote_addr), COUNT(*),"
+        " SUM(CASE WHEN fe.verdict LIKE '%DROP%' OR fe.verdict='BLOCK' THEN 1 ELSE 0 END)"
+        " FROM flow_events fe LEFT JOIN process_identity pi ON fe.image_id = pi.id"
+        " GROUP BY app ORDER BY COUNT(*) DESC LIMIT 500;", -1, &s, nullptr);
+    int row = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        SetCell(lv, row, 0, (const char*)sqlite3_column_text(s, 0));
+        SetCell(lv, row, 1, std::to_string(sqlite3_column_int(s, 1)).c_str());
+        SetCell(lv, row, 2, std::to_string(sqlite3_column_int(s, 2)).c_str());
+        SetCell(lv, row, 3, std::to_string(sqlite3_column_int(s, 3)).c_str());
+        ++row;
+    }
+    sqlite3_finalize(s);
+}
+
+// Decision history: the most recent connections the firewall denied.
+void FillHistory(HWND lv) {
+    ListView_DeleteAllItems(lv);
+    Db d; if (!d.open(DbPathU8().c_str())) return;
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(d.handle(),
+        "SELECT fe.ts_utc, fe.verdict, COALESCE(pi.signer, pi.image_path, fe.image_path),"
+        " COALESCE(fe.remote_domain, fe.remote_addr), fe.remote_port"
+        " FROM flow_events fe LEFT JOIN process_identity pi ON fe.image_id = pi.id"
+        " WHERE fe.verdict LIKE '%DROP%' OR fe.verdict='BLOCK'"
+        " ORDER BY fe.id DESC LIMIT 500;", -1, &s, nullptr);
+    int row = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        const char* ts = (const char*)sqlite3_column_text(s, 0);
+        std::string tm = ts ? ts : ""; if (tm.size() >= 19) tm = tm.substr(11, 8);
+        SetCell(lv, row, 0, tm.c_str());
+        SetCell(lv, row, 1, (const char*)sqlite3_column_text(s, 1));
+        SetCell(lv, row, 2, (const char*)sqlite3_column_text(s, 2));
+        SetCell(lv, row, 3, (const char*)sqlite3_column_text(s, 3));
+        SetCell(lv, row, 4, std::to_string(sqlite3_column_int(s, 4)).c_str());
+        ++row;
+    }
+    sqlite3_finalize(s);
+}
+
 void FillRules(HWND lv) {
     ListView_DeleteAllItems(lv);
     Db d; if (!d.open(DbPathU8().c_str())) return;
@@ -302,9 +350,11 @@ void LayoutChildren() {
 void ShowTab(int i) {
     g_cur = i;
     for (int k = 0; k < TAB_COUNT; ++k) ShowWindow(g_lv[k], k == i ? SW_SHOW : SW_HIDE);
-    if (i == TAB_LIVE)        PollLive();
-    else if (i == TAB_RULES)  FillRules(g_lv[TAB_RULES]);
-    else                      FillHabits(g_lv[TAB_HABITS]);
+    if (i == TAB_LIVE)         PollLive();
+    else if (i == TAB_RULES)   FillRules(g_lv[TAB_RULES]);
+    else if (i == TAB_HABITS)  FillHabits(g_lv[TAB_HABITS]);
+    else if (i == TAB_APPS)    FillApps(g_lv[TAB_APPS]);
+    else                       FillHistory(g_lv[TAB_HISTORY]);
 }
 
 LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
@@ -402,9 +452,11 @@ void OpenDashboard(HINSTANCE hInst) {
 
     g_tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, g_dash, nullptr, hInst, nullptr);
     TCITEMW ti{}; ti.mask = TCIF_TEXT;
-    ti.pszText = const_cast<LPWSTR>(L"Live");   TabCtrl_InsertItem(g_tabs, TAB_LIVE, &ti);
-    ti.pszText = const_cast<LPWSTR>(L"Rules");  TabCtrl_InsertItem(g_tabs, TAB_RULES, &ti);
-    ti.pszText = const_cast<LPWSTR>(L"Habits"); TabCtrl_InsertItem(g_tabs, TAB_HABITS, &ti);
+    ti.pszText = const_cast<LPWSTR>(L"Live");    TabCtrl_InsertItem(g_tabs, TAB_LIVE, &ti);
+    ti.pszText = const_cast<LPWSTR>(L"Rules");   TabCtrl_InsertItem(g_tabs, TAB_RULES, &ti);
+    ti.pszText = const_cast<LPWSTR>(L"Habits");  TabCtrl_InsertItem(g_tabs, TAB_HABITS, &ti);
+    ti.pszText = const_cast<LPWSTR>(L"Per-app"); TabCtrl_InsertItem(g_tabs, TAB_APPS, &ti);
+    ti.pszText = const_cast<LPWSTR>(L"History"); TabCtrl_InsertItem(g_tabs, TAB_HISTORY, &ti);
 
     DWORD lvStyle = WS_CHILD | LVS_REPORT | LVS_SHOWSELALWAYS;
     for (int i = 0; i < TAB_COUNT; ++i) {
@@ -424,6 +476,15 @@ void OpenDashboard(HINSTANCE hInst) {
     AddCol(g_lv[TAB_HABITS], 1, L"Destination", 340);
     AddCol(g_lv[TAB_HABITS], 2, L"Port", 70);
     AddCol(g_lv[TAB_HABITS], 3, L"Count", 70);
+    AddCol(g_lv[TAB_APPS], 0, L"Application", 320);
+    AddCol(g_lv[TAB_APPS], 1, L"Destinations", 110);
+    AddCol(g_lv[TAB_APPS], 2, L"Events", 90);
+    AddCol(g_lv[TAB_APPS], 3, L"Blocked", 90);
+    AddCol(g_lv[TAB_HISTORY], 0, L"Time", 80);
+    AddCol(g_lv[TAB_HISTORY], 1, L"Verdict", 80);
+    AddCol(g_lv[TAB_HISTORY], 2, L"Application", 220);
+    AddCol(g_lv[TAB_HISTORY], 3, L"Destination", 300);
+    AddCol(g_lv[TAB_HISTORY], 4, L"Port", 60);
 
     g_log = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
                             WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
