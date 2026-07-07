@@ -5,10 +5,14 @@
 #include "ngtray/dashboard.h"
 
 #include "core/db.h"
+#include "core/util.h"
 
 #include <windows.h>
 #include <commctrl.h>
+#include <commdlg.h>
 
+#include <cctype>
+#include <cstdio>
 #include <string>
 #include <thread>
 #include <vector>
@@ -18,7 +22,9 @@ namespace {
 
 enum { TAB_LIVE = 0, TAB_RULES = 1, TAB_HABITS = 2, TAB_APPS = 3, TAB_HISTORY = 4, TAB_COUNT = 5 };
 enum { IDB_ENFORCE = 100, IDB_LEARN, IDB_STOP, IDB_PANIC, IDB_REFRESH, IDB_COUNT_ = 5 };
-enum { IDM_BLOCK_DEST = 300, IDM_ALLOW_DEST, IDM_ALLOW_APP, IDM_BLOCK_APP, IDM_DEL_RULE };
+enum { IDM_BLOCK_DEST = 300, IDM_ALLOW_DEST, IDM_ALLOW_APP, IDM_BLOCK_APP,
+       IDM_ALLOW_DEST_1H, IDM_DEL_RULE };
+enum { IDC_SEARCH = 400, IDB_EXPORT = 401, IDB_IMPORT = 402 };
 constexpr UINT WM_APP_LOG = WM_APP + 7;
 
 const wchar_t* kBtnLabel[IDB_COUNT_] = {L"Enforce", L"Learn", L"Stop", L"Panic", L"Refresh"};
@@ -26,10 +32,22 @@ const wchar_t* kBtnLabel[IDB_COUNT_] = {L"Enforce", L"Learn", L"Stop", L"Panic",
 HWND g_dash = nullptr, g_tabs = nullptr, g_status = nullptr, g_log = nullptr;
 HWND g_lv[TAB_COUNT] = {};
 HWND g_btn[IDB_COUNT_] = {};
+HWND g_search = nullptr, g_export = nullptr, g_import = nullptr;
 int  g_cur = 0;
 long long g_lastEventId = -1;
 long long g_ctxParam = 0;   // DB id of the row the context menu was opened on
+std::string g_filter;       // search box text (lower-cased); "" = no filter
 HANDLE g_child = nullptr;   // the running ngd daemon (enforce/record), if any
+
+void InitLiveCursor();   // defined below; reset the Live feed cursor
+
+// Case-insensitive substring filter for the search box. Empty filter matches all.
+bool MatchFilter(const std::string& hay) {
+    if (g_filter.empty()) return true;
+    std::string h = hay;
+    for (char& c : h) c = (char)tolower((unsigned char)c);
+    return h.find(g_filter) != std::string::npos;
+}
 
 std::wstring ExeDir() {
     wchar_t p[MAX_PATH]; GetModuleFileNameW(nullptr, p, MAX_PATH);
@@ -155,7 +173,7 @@ void BumpGen(sqlite3* h) {
 }
 // Add a rule from a live flow_event: block/allow, matching either the app (any
 // port) or the destination IP:port. ngd enforce picks it up on the gen bump.
-void AddRuleFromEvent(long long eventId, bool block, bool useApp) {
+void AddRuleFromEvent(long long eventId, bool block, bool useApp, int ttlSeconds = 0) {
     Db d; if (!d.open(DbPathU8().c_str())) return;
     sqlite3_stmt* s = nullptr;
     sqlite3_prepare_v2(d.handle(),
@@ -178,8 +196,8 @@ void AddRuleFromEvent(long long eventId, bool block, bool useApp) {
     }
     sqlite3_stmt* ins = nullptr;
     sqlite3_prepare_v2(d.handle(),
-        "INSERT INTO rules(action,app_path,remote_addr,remote_port,protocol,enabled,created_at)"
-        " VALUES(?,?,?,?,?,1,datetime('now'));", -1, &ins, nullptr);
+        "INSERT INTO rules(action,app_path,remote_addr,remote_port,protocol,enabled,expires_epoch,created_at)"
+        " VALUES(?,?,?,?,?,1,?,datetime('now'));", -1, &ins, nullptr);
     bindText(ins, 1, block ? "block" : "permit");
     if (useApp) {
         bindText(ins, 2, path); sqlite3_bind_null(ins, 3);
@@ -188,12 +206,19 @@ void AddRuleFromEvent(long long eventId, bool block, bool useApp) {
         sqlite3_bind_null(ins, 2); bindText(ins, 3, ip);
         sqlite3_bind_int(ins, 4, port); sqlite3_bind_int(ins, 5, 6);
     }
+    if (ttlSeconds > 0) {
+        FILETIME ft; GetSystemTimeAsFileTime(&ft);
+        sqlite3_bind_double(ins, 6, util::UnixEpoch(ft) + ttlSeconds);
+    } else {
+        sqlite3_bind_null(ins, 6);
+    }
     sqlite3_step(ins);
     sqlite3_finalize(ins);
     BumpGen(d.handle());
     std::wstring what = useApp ? Widen(path.c_str())
                                : Widen(ip.c_str()) + L":" + std::to_wstring(port);
-    AppendLog((block ? L"[rules] BLOCK " : L"[rules] ALLOW ") + what + L" added (live).\r\n");
+    std::wstring ttl = ttlSeconds > 0 ? L" for " + std::to_wstring(ttlSeconds / 60) + L" min" : L"";
+    AppendLog((block ? L"[rules] BLOCK " : L"[rules] ALLOW ") + what + ttl + L" added (live).\r\n");
 }
 void DelRule(long long ruleId) {
     Db d; if (!d.open(DbPathU8().c_str())) return;
@@ -205,6 +230,84 @@ void DelRule(long long ruleId) {
     AppendLog(L"[rules] rule deleted (live).\r\n");
 }
 
+// Common file-dialog helper (save/open a .txt allow-list).
+std::wstring PickFile(bool save) {
+    wchar_t path[MAX_PATH] = L"neuralguard-rules.txt";
+    OPENFILENAMEW ofn{}; ofn.lStructSize = sizeof(ofn); ofn.hwndOwner = g_dash;
+    ofn.lpstrFilter = L"NeuralGuard rules\0*.txt\0All files\0*.*\0";
+    ofn.lpstrFile = path; ofn.nMaxFile = MAX_PATH; ofn.lpstrDefExt = L"txt";
+    ofn.Flags = save ? (OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST)
+                     : (OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST);
+    BOOL ok = save ? GetSaveFileNameW(&ofn) : GetOpenFileNameW(&ofn);
+    return ok ? std::wstring(path) : std::wstring();
+}
+
+// Export enabled rules to a pipe-delimited text file.
+void ExportRules() {
+    std::wstring file = PickFile(true);
+    if (file.empty()) return;
+    Db d; if (!d.open(DbPathU8().c_str())) return;
+    FILE* f = _wfopen(file.c_str(), L"w");
+    if (!f) { AppendLog(L"[rules] export: can't write file.\r\n"); return; }
+    fprintf(f, "# NeuralGuard rules: action|app_path|remote_addr|remote_port|protocol|expires_epoch\n");
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(d.handle(),
+        "SELECT action, COALESCE(app_path,''), COALESCE(remote_addr,''),"
+        " COALESCE(remote_port,0), COALESCE(protocol,0), COALESCE(expires_epoch,0)"
+        " FROM rules WHERE enabled=1;", -1, &s, nullptr);
+    int n = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        fprintf(f, "%s|%s|%s|%d|%d|%.0f\n",
+                (const char*)sqlite3_column_text(s, 0), (const char*)sqlite3_column_text(s, 1),
+                (const char*)sqlite3_column_text(s, 2), sqlite3_column_int(s, 3),
+                sqlite3_column_int(s, 4), sqlite3_column_double(s, 5));
+        ++n;
+    }
+    sqlite3_finalize(s);
+    fclose(f);
+    AppendLog(L"[rules] exported " + std::to_wstring(n) + L" rule(s).\r\n");
+}
+
+// Import rules from a pipe-delimited file (skips comments/blank lines).
+void ImportRules() {
+    std::wstring file = PickFile(false);
+    if (file.empty()) return;
+    FILE* f = _wfopen(file.c_str(), L"r");
+    if (!f) { AppendLog(L"[rules] import: can't read file.\r\n"); return; }
+    Db d; if (!d.open(DbPathU8().c_str())) { fclose(f); return; }
+    char line[1024]; int n = 0;
+    while (fgets(line, sizeof(line), f)) {
+        std::string ln(line);
+        while (!ln.empty() && (ln.back() == '\n' || ln.back() == '\r')) ln.pop_back();
+        if (ln.empty() || ln[0] == '#') continue;
+        std::string col[6]; int nc = 0; size_t p = 0;
+        while (nc < 6) {
+            size_t q = ln.find('|', p);
+            col[nc++] = ln.substr(p, q == std::string::npos ? std::string::npos : q - p);
+            if (q == std::string::npos) break;
+            p = q + 1;
+        }
+        if (nc < 5 || (col[0] != "permit" && col[0] != "block")) continue;
+        int port = atoi(col[3].c_str()), proto = atoi(col[4].c_str());
+        double expires = nc >= 6 ? atof(col[5].c_str()) : 0;
+        sqlite3_stmt* ins = nullptr;
+        sqlite3_prepare_v2(d.handle(),
+            "INSERT INTO rules(action,app_path,remote_addr,remote_port,protocol,enabled,expires_epoch,created_at)"
+            " VALUES(?,?,?,?,?,1,?,datetime('now'));", -1, &ins, nullptr);
+        bindText(ins, 1, col[0].c_str());
+        if (!col[1].empty()) bindText(ins, 2, col[1].c_str()); else sqlite3_bind_null(ins, 2);
+        if (!col[2].empty()) bindText(ins, 3, col[2].c_str()); else sqlite3_bind_null(ins, 3);
+        if (port) sqlite3_bind_int(ins, 4, port); else sqlite3_bind_null(ins, 4);
+        if (proto) sqlite3_bind_int(ins, 5, proto); else sqlite3_bind_null(ins, 5);
+        if (expires > 0) sqlite3_bind_double(ins, 6, expires); else sqlite3_bind_null(ins, 6);
+        sqlite3_step(ins); sqlite3_finalize(ins);
+        ++n;
+    }
+    fclose(f);
+    BumpGen(d.handle());
+    AppendLog(L"[rules] imported " + std::to_wstring(n) + L" rule(s).\r\n");
+}
+
 void FillHabits(HWND lv) {
     ListView_DeleteAllItems(lv);
     Db d; if (!d.open(DbPathU8().c_str())) return;
@@ -214,8 +317,11 @@ void FillHabits(HWND lv) {
         " ORDER BY count DESC LIMIT 1000;", -1, &s, nullptr);
     int row = 0;
     while (sqlite3_step(s) == SQLITE_ROW) {
-        SetCell(lv, row, 0, (const char*)sqlite3_column_text(s, 0));
-        SetCell(lv, row, 1, (const char*)sqlite3_column_text(s, 1));
+        const char* c0 = (const char*)sqlite3_column_text(s, 0);
+        const char* c1 = (const char*)sqlite3_column_text(s, 1);
+        if (!MatchFilter(std::string(c0 ? c0 : "") + " " + (c1 ? c1 : ""))) continue;
+        SetCell(lv, row, 0, c0);
+        SetCell(lv, row, 1, c1);
         SetCell(lv, row, 2, std::to_string(sqlite3_column_int(s, 2)).c_str());
         SetCell(lv, row, 3, std::to_string(sqlite3_column_int(s, 3)).c_str());
         ++row;
@@ -236,7 +342,9 @@ void FillApps(HWND lv) {
         " GROUP BY app ORDER BY COUNT(*) DESC LIMIT 500;", -1, &s, nullptr);
     int row = 0;
     while (sqlite3_step(s) == SQLITE_ROW) {
-        SetCell(lv, row, 0, (const char*)sqlite3_column_text(s, 0));
+        const char* c0 = (const char*)sqlite3_column_text(s, 0);
+        if (!MatchFilter(c0 ? c0 : "")) continue;
+        SetCell(lv, row, 0, c0);
         SetCell(lv, row, 1, std::to_string(sqlite3_column_int(s, 1)).c_str());
         SetCell(lv, row, 2, std::to_string(sqlite3_column_int(s, 2)).c_str());
         SetCell(lv, row, 3, std::to_string(sqlite3_column_int(s, 3)).c_str());
@@ -259,11 +367,14 @@ void FillHistory(HWND lv) {
     int row = 0;
     while (sqlite3_step(s) == SQLITE_ROW) {
         const char* ts = (const char*)sqlite3_column_text(s, 0);
+        const char* c2 = (const char*)sqlite3_column_text(s, 2);
+        const char* c3 = (const char*)sqlite3_column_text(s, 3);
+        if (!MatchFilter(std::string(c2 ? c2 : "") + " " + (c3 ? c3 : ""))) continue;
         std::string tm = ts ? ts : ""; if (tm.size() >= 19) tm = tm.substr(11, 8);
         SetCell(lv, row, 0, tm.c_str());
         SetCell(lv, row, 1, (const char*)sqlite3_column_text(s, 1));
-        SetCell(lv, row, 2, (const char*)sqlite3_column_text(s, 2));
-        SetCell(lv, row, 3, (const char*)sqlite3_column_text(s, 3));
+        SetCell(lv, row, 2, c2);
+        SetCell(lv, row, 3, c3);
         SetCell(lv, row, 4, std::to_string(sqlite3_column_int(s, 4)).c_str());
         ++row;
     }
@@ -280,8 +391,11 @@ void FillRules(HWND lv) {
         " FROM rules ORDER BY id DESC;", -1, &s, nullptr);
     int row = 0;
     while (sqlite3_step(s) == SQLITE_ROW) {
-        InsertRow(lv, row, (const char*)sqlite3_column_text(s, 1), sqlite3_column_int64(s, 0));
-        SetCell(lv, row, 1, (const char*)sqlite3_column_text(s, 2));
+        const char* act = (const char*)sqlite3_column_text(s, 1);
+        const char* tgt = (const char*)sqlite3_column_text(s, 2);
+        if (!MatchFilter(std::string(act ? act : "") + " " + (tgt ? tgt : ""))) continue;
+        InsertRow(lv, row, act, sqlite3_column_int64(s, 0));
+        SetCell(lv, row, 1, tgt);
         int port = sqlite3_column_int(s, 3);
         SetCell(lv, row, 2, port ? std::to_string(port).c_str() : "any");
         std::string info = sqlite3_column_int(s, 4) ? "" : "disabled";
@@ -305,12 +419,15 @@ void PollLive() {
     while (sqlite3_step(s) == SQLITE_ROW) {
         g_lastEventId = sqlite3_column_int64(s, 0);
         const char* ts = (const char*)sqlite3_column_text(s, 1);
+        const char* app = (const char*)sqlite3_column_text(s, 3);
+        const char* dst = (const char*)sqlite3_column_text(s, 4);
+        if (!MatchFilter(std::string(app ? app : "") + " " + (dst ? dst : ""))) continue;
         std::string tm = ts ? ts : "";
         if (tm.size() >= 19) tm = tm.substr(11, 8);
         InsertRow(lv, 0, tm.c_str(), g_lastEventId);   // lParam = flow_event id
         SetCell(lv, 0, 1, (const char*)sqlite3_column_text(s, 2));
-        SetCell(lv, 0, 2, (const char*)sqlite3_column_text(s, 3));
-        SetCell(lv, 0, 3, (const char*)sqlite3_column_text(s, 4));
+        SetCell(lv, 0, 2, app);
+        SetCell(lv, 0, 3, dst);
         SetCell(lv, 0, 4, std::to_string(sqlite3_column_int(s, 5)).c_str());
     }
     sqlite3_finalize(s);
@@ -338,6 +455,10 @@ void LayoutChildren() {
     const int barH = 38, logH = 130, bw = 84, bh = 26, gap = 6;
     int x = 8;
     for (int i = 0; i < IDB_COUNT_; ++i) { MoveWindow(g_btn[i], x, 6, bw, bh, TRUE); x += bw + gap; }
+    MoveWindow(g_export, x, 6, bw, bh, TRUE); x += bw + gap;
+    MoveWindow(g_import, x, 6, bw, bh, TRUE); x += bw + gap;
+    int sx = x + 12, sw = rc.right - sx - 10;
+    MoveWindow(g_search, sx, 8, sw > 80 ? sw : 80, bh - 2, TRUE);
     int bottom = rc.bottom - sbh;
     MoveWindow(g_log, 0, bottom - logH, rc.right, logH, TRUE);
     MoveWindow(g_tabs, 0, barH, rc.right, bottom - logH - barH, TRUE);
@@ -374,6 +495,7 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 if (g_cur == TAB_LIVE) {
                     AppendMenuW(menu, MF_STRING, IDM_BLOCK_DEST, L"Block this destination (IP:port)");
                     AppendMenuW(menu, MF_STRING, IDM_ALLOW_DEST, L"Allow this destination (IP:port)");
+                    AppendMenuW(menu, MF_STRING, IDM_ALLOW_DEST_1H, L"Allow this destination for 1 hour");
                     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
                     AppendMenuW(menu, MF_STRING, IDM_ALLOW_APP, L"Allow this app (any port)");
                     AppendMenuW(menu, MF_STRING, IDM_BLOCK_APP, L"Block this app (any port)");
@@ -391,6 +513,16 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case WM_TIMER: UpdateStatus(); if (g_cur == TAB_LIVE) PollLive(); return 0;
         case WM_APP_LOG: { wchar_t* p = (wchar_t*)w; AppendLog(p); free(p); return 0; }
         case WM_COMMAND:
+            if (LOWORD(w) == IDC_SEARCH && HIWORD(w) == EN_CHANGE) {
+                wchar_t buf[128] = {}; GetWindowTextW(g_search, buf, 128);
+                std::wstring ws = buf; for (wchar_t& c : ws) c = towlower(c);
+                int n = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), (int)ws.size(), nullptr, 0, nullptr, nullptr);
+                g_filter.assign(n, 0);
+                WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), (int)ws.size(), g_filter.data(), n, nullptr, nullptr);
+                if (g_cur == TAB_LIVE) { ListView_DeleteAllItems(g_lv[TAB_LIVE]); InitLiveCursor(); }
+                ShowTab(g_cur);
+                return 0;
+            }
             switch (LOWORD(w)) {
                 case IDB_ENFORCE:
                     StopDaemon();
@@ -403,11 +535,14 @@ LRESULT CALLBACK Proc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 case IDB_STOP:    StopDaemon(); AppendLog(L"[dashboard] stopped; failing open.\r\n"); break;
                 case IDB_PANIC:   StopDaemon(); AppendLog(L"[dashboard] PANIC - all filters removed.\r\n"); break;
                 case IDB_REFRESH: ShowTab(g_cur); break;
-                case IDM_BLOCK_DEST: AddRuleFromEvent(g_ctxParam, true,  false); break;
-                case IDM_ALLOW_DEST: AddRuleFromEvent(g_ctxParam, false, false); break;
-                case IDM_ALLOW_APP:  AddRuleFromEvent(g_ctxParam, false, true);  break;
-                case IDM_BLOCK_APP:  AddRuleFromEvent(g_ctxParam, true,  true);  break;
-                case IDM_DEL_RULE:   DelRule(g_ctxParam); FillRules(g_lv[TAB_RULES]); break;
+                case IDM_BLOCK_DEST:    AddRuleFromEvent(g_ctxParam, true,  false);       break;
+                case IDM_ALLOW_DEST:    AddRuleFromEvent(g_ctxParam, false, false);       break;
+                case IDM_ALLOW_DEST_1H: AddRuleFromEvent(g_ctxParam, false, false, 3600); break;
+                case IDM_ALLOW_APP:     AddRuleFromEvent(g_ctxParam, false, true);        break;
+                case IDM_BLOCK_APP:     AddRuleFromEvent(g_ctxParam, true,  true);        break;
+                case IDM_DEL_RULE:      DelRule(g_ctxParam); FillRules(g_lv[TAB_RULES]);  break;
+                case IDB_EXPORT:        ExportRules(); break;
+                case IDB_IMPORT:        ImportRules(); FillRules(g_lv[TAB_RULES]); break;
             }
             return 0;
         case WM_DESTROY: KillTimer(h, 1); g_dash = nullptr; return 0;
@@ -449,6 +584,14 @@ void OpenDashboard(HINSTANCE hInst) {
     for (int i = 0; i < IDB_COUNT_; ++i)
         g_btn[i] = CreateWindowW(L"BUTTON", kBtnLabel[i], WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
                                  0, 0, 0, 0, g_dash, (HMENU)(INT_PTR)(IDB_ENFORCE + i), hInst, nullptr);
+    g_export = CreateWindowW(L"BUTTON", L"Export", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                             0, 0, 0, 0, g_dash, (HMENU)(INT_PTR)IDB_EXPORT, hInst, nullptr);
+    g_import = CreateWindowW(L"BUTTON", L"Import", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+                             0, 0, 0, 0, g_dash, (HMENU)(INT_PTR)IDB_IMPORT, hInst, nullptr);
+    g_search = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                               WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+                               0, 0, 0, 0, g_dash, (HMENU)(INT_PTR)IDC_SEARCH, hInst, nullptr);
+    SendMessageW(g_search, EM_SETCUEBANNER, TRUE, (LPARAM)L"Search…");
 
     g_tabs = CreateWindowW(WC_TABCONTROLW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, g_dash, nullptr, hInst, nullptr);
     TCITEMW ti{}; ti.mask = TCIF_TEXT;
