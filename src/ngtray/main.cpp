@@ -111,7 +111,9 @@ void PipeServer() {
 LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
         case WM_TRAY:
-            if (LOWORD(l) == WM_RBUTTONUP || LOWORD(l) == WM_CONTEXTMENU) {
+            if (LOWORD(l) == WM_LBUTTONDBLCLK) {
+                ng::OpenDashboard(g_hInst);  // double-click the tray icon -> dashboard
+            } else if (LOWORD(l) == WM_RBUTTONUP || LOWORD(l) == WM_CONTEXTMENU) {
                 POINT pt; GetCursorPos(&pt);
                 HMENU m = CreatePopupMenu();
                 AppendMenuW(m, MF_STRING, ID_DASHBOARD, L"Dashboard");
