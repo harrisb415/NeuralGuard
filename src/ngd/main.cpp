@@ -20,6 +20,7 @@
 #include "core/util.h"
 #include "ngd/enforce.h"
 #include "ngd/recorder.h"
+#include "ngd/service.h"
 
 #include <windows.h>
 
@@ -433,6 +434,18 @@ int main(int argc, char** argv) {
             PrintUsage();
             return 0;
         }
+    }
+
+    // Service control - handled before the normal mode parsing.
+    if (argc >= 2 && strcmp(argv[1], "service-run") == 0)   // invoked by the SCM
+        return ng::ServiceRun(argc >= 3 ? argv[2] : "ngpolicy.db");
+    if (argc >= 2 && (strcmp(argv[1], "install") == 0 || strcmp(argv[1], "uninstall") == 0)) {
+        if (!IsElevated()) { fprintf(stderr, "service install/uninstall needs Administrator.\n"); return 1; }
+        if (strcmp(argv[1], "uninstall") == 0) return ng::ServiceUninstall();
+        const char* rel = argc >= 3 ? argv[2] : "ngpolicy.db";   // absolute: service runs from System32
+        char abs[MAX_PATH];
+        if (!GetFullPathNameA(rel, MAX_PATH, abs, nullptr)) { fprintf(stderr, "bad db path\n"); return 1; }
+        return ng::ServiceInstall(abs);
     }
 
     const char* mode = "record";

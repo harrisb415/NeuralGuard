@@ -103,7 +103,14 @@ bool Enforcer::ensureObjects() {
 
 bool Enforcer::open() {
     HANDLE eng = nullptr;
-    DWORD e = FwpmEngineOpen0(nullptr, RPC_C_AUTHN_WINNT, nullptr, nullptr, &eng);
+    // Dynamic session: every object we add (provider, sublayer, filters) is
+    // auto-deleted by BFE when this session ends - including if the process
+    // dies unexpectedly. That IS our fail-open-on-death guarantee: a crashed
+    // enforcer can never leave the machine locked down.
+    FWPM_SESSION0 session{};
+    session.flags = FWPM_SESSION_FLAG_DYNAMIC;
+    session.displayData.name = const_cast<wchar_t*>(L"NeuralGuard enforcer");
+    DWORD e = FwpmEngineOpen0(nullptr, RPC_C_AUTHN_WINNT, nullptr, &session, &eng);
     if (e != ERROR_SUCCESS) {
         fprintf(stderr, "FwpmEngineOpen0 failed: 0x%08lX (are you elevated?)\n", e);
         return false;

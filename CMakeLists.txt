@@ -48,7 +48,7 @@ target_compile_options(ngmon PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 target_link_libraries(ngmon PRIVATE fwpuclnt ws2_32)
 
 # --- ngd (Phase 1): WFP net-event recorder ----------------------------------
-add_executable(ngd src/ngd/main.cpp src/ngd/recorder.cpp src/ngd/enforce.cpp)
+add_executable(ngd src/ngd/main.cpp src/ngd/recorder.cpp src/ngd/enforce.cpp src/ngd/service.cpp)
 target_compile_definitions(ngd PRIVATE ${NG_DEFS})
 target_compile_options(ngd PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 target_link_libraries(ngd PRIVATE ngcore fwpuclnt ws2_32)
