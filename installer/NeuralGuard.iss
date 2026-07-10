@@ -64,7 +64,14 @@ Name: "{group}\Uninstall NeuralGuard"; Filename: "{uninstallexe}"
 Name: "{userstartup}\NeuralGuard"; Filename: "{app}\ngtray.exe"; Tasks: startup
 
 [Run]
-Filename: "{app}\ngtray.exe"; Description: "Launch NeuralGuard now"; Flags: nowait postinstall skipifsilent
+; ngtray.exe's manifest requires Administrator. [Run] entries launch via
+; CreateProcess by default, which can't elevate a manifested-admin target
+; (fails with "CreateProcess failed; code 740" - ERROR_ELEVATION_REQUIRED).
+; shellexec routes it through ShellExecute instead, which Windows elevates
+; with a normal UAC prompt - the same path Start Menu/desktop shortcuts
+; already use (shortcut activation is always shell-based, so those work
+; without this flag).
+Filename: "{app}\ngtray.exe"; Description: "Launch NeuralGuard now"; Flags: nowait postinstall skipifsilent shellexec
 
 [Code]
 // An upgrade-over-a-running-install would fail to overwrite locked .exe/.dll

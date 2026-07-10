@@ -5,6 +5,19 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-07-10
+
+### Fixed
+
+- The installer's "Launch NeuralGuard now" finish-page step failed with
+  *"CreateProcess failed; code 740 - The requested operation requires
+  elevation"* on a real end-user run. `ngtray.exe`'s manifest requires
+  Administrator, and Inno Setup's `[Run]` entries launch via `CreateProcess`
+  by default, which can't auto-elevate a manifested-admin target — only
+  `ShellExecute` can. Start Menu/desktop shortcuts were unaffected (shortcut
+  activation is always shell-based); only this one post-install step needed
+  the `shellexec` flag added.
+
 ## [1.1.0] - 2026-07-10
 
 ### Added
