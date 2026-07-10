@@ -1,8 +1,10 @@
 #pragma once
 #include <windows.h>
 #include <shellapi.h>   // ShellExecuteExW (elevated tool launch)
+#include <commdlg.h>    // GetOpenFileNameW / GetSaveFileNameW (rules export/import)
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Advapi32.lib")   // service control manager (Settings tab)
+#pragma comment(lib, "Comdlg32.lib")   // common file dialogs (rules export/import)
 #include <unknwn.h>
 #include <restrictederrorinfo.h>
 #include <hstring.h>

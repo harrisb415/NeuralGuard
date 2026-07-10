@@ -8,6 +8,8 @@
 #include "Row.h"
 #include "ColWidths.h"
 
+#include <microsoft.ui.xaml.window.h>   // IWindowNative -> HWND for the file dialogs
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -324,10 +326,28 @@ namespace winrt::NeuralGuard::implementation
             });
         }
 
+        // Remember the selected row so the highlight survives the wholesale rebuild.
+        int64_t selId = 0;
+        if (auto sel = DataList().SelectedItem().try_as<NeuralGuard::Row>()) selId = sel.Id();
+
         auto items = single_threaded_observable_vector<IInspectable>();
         for (auto const& r : rows)
             items.Append(MakeRow(r.id, r.c[0], r.c[1], r.c[2], r.c[3], r.c[4]));
         DataList().ItemsSource(items);
+
+        if (selId != 0)
+        {
+            uint32_t idx = 0;
+            for (auto const& it : items)
+            {
+                if (auto r = it.try_as<NeuralGuard::Row>(); r && r.Id() == selId)
+                {
+                    DataList().SelectedIndex((int32_t)idx);
+                    break;
+                }
+                ++idx;
+            }
+        }
     }
 
     void MainWindow::ShowView(hstring const& tag)
@@ -346,6 +366,7 @@ namespace winrt::NeuralGuard::implementation
         DataList().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
         SettingsPanel().Visibility(settings ? Visibility::Visible : Visibility::Collapsed);
         SearchBox().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
+        RulesTools().Visibility((tag == L"rules") ? Visibility::Visible : Visibility::Collapsed);
         filter_ = L"";
         SearchBox().Text(L"");   // reset the filter when switching views
         if (settings) LoadSettings();
@@ -357,6 +378,107 @@ namespace winrt::NeuralGuard::implementation
     {
         filter_ = box.Text();
         if (curView_ != L"settings") RefreshCurrent();
+    }
+
+    HWND MainWindow::WindowHandle()
+    {
+        HWND h = nullptr;
+        if (auto native = this->try_as<::IWindowNative>())
+            native->get_WindowHandle(&h);
+        return h;
+    }
+
+    // Rules are exported/imported as pipe-delimited text, one rule per line:
+    //   action|app_path|remote_addr|remote_port|protocol|enabled|expires_epoch
+    void MainWindow::OnExportRules(IInspectable const&, RoutedEventArgs const&)
+    {
+        wchar_t file[MAX_PATH] = L"neuralguard-rules.txt";
+        OPENFILENAMEW ofn{}; ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = WindowHandle();
+        ofn.lpstrFilter = L"Rules (*.txt)\0*.txt\0All files\0*.*\0";
+        ofn.lpstrFile = file; ofn.nMaxFile = MAX_PATH;
+        ofn.lpstrDefExt = L"txt";
+        ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (!GetSaveFileNameW(&ofn)) return;   // cancelled
+
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) { Notify(L"Couldn't open the policy database.", InfoBarSeverity::Error); return; }
+        std::string out;
+        int n = 0;
+        d.each("SELECT action, COALESCE(app_path,''), COALESCE(remote_addr,''), COALESCE(remote_port,0),"
+               " COALESCE(protocol,0), enabled, CAST(COALESCE(expires_epoch,0) AS INTEGER)"
+               " FROM rules ORDER BY id;", [&](sqlite3_stmt* s) {
+            out += ng::Db::ColText(s, 0); out += '|';
+            out += ng::Db::ColText(s, 1); out += '|';
+            out += ng::Db::ColText(s, 2); out += '|';
+            out += std::to_string(sqlite3_column_int(s, 3)); out += '|';
+            out += std::to_string(sqlite3_column_int(s, 4)); out += '|';
+            out += std::to_string(sqlite3_column_int(s, 5)); out += '|';
+            out += std::to_string(sqlite3_column_int64(s, 6)); out += "\r\n";
+            ++n;
+        });
+
+        HANDLE h = CreateFileW(file, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) { Notify(L"Couldn't write that file.", InfoBarSeverity::Error); return; }
+        DWORD wr = 0; WriteFile(h, out.data(), (DWORD)out.size(), &wr, nullptr); CloseHandle(h);
+        Notify(L"Exported " + to_hstring(n) + L" rule(s).", InfoBarSeverity::Success);
+    }
+
+    void MainWindow::OnImportRules(IInspectable const&, RoutedEventArgs const&)
+    {
+        wchar_t file[MAX_PATH] = L"";
+        OPENFILENAMEW ofn{}; ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = WindowHandle();
+        ofn.lpstrFilter = L"Rules (*.txt)\0*.txt\0All files\0*.*\0";
+        ofn.lpstrFile = file; ofn.nMaxFile = MAX_PATH;
+        ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (!GetOpenFileNameW(&ofn)) return;
+
+        HANDLE h = CreateFileW(file, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) { Notify(L"Couldn't read that file.", InfoBarSeverity::Error); return; }
+        std::string content; char buf[4096]; DWORD rd = 0;
+        while (ReadFile(h, buf, sizeof(buf), &rd, nullptr) && rd > 0) content.append(buf, rd);
+        CloseHandle(h);
+
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) { Notify(L"Couldn't open the policy database.", InfoBarSeverity::Error); return; }
+        sqlite3_stmt* ins = nullptr;
+        sqlite3_prepare_v2(d.handle(),
+            "INSERT INTO rules(action,app_path,remote_addr,remote_port,protocol,enabled,expires_epoch,created_at)"
+            " VALUES(?,?,?,?,?,?,?,datetime('now'));", -1, &ins, nullptr);
+        int n = 0;
+        double now = (double)time(nullptr);
+        size_t pos = 0;
+        while (pos < content.size())
+        {
+            size_t eol = content.find('\n', pos);
+            std::string line = content.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
+            pos = (eol == std::string::npos) ? content.size() : eol + 1;
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.pop_back();
+            if (line.empty()) continue;
+
+            std::vector<std::string> f;
+            size_t p = 0;
+            for (;;) { size_t bar = line.find('|', p);
+                       f.push_back(line.substr(p, bar == std::string::npos ? std::string::npos : bar - p));
+                       if (bar == std::string::npos) break; p = bar + 1; }
+            if (f.size() < 7) continue;
+            if (f[0] != "permit" && f[0] != "block") continue;   // skip headers / junk
+
+            sqlite3_reset(ins);
+            sqlite3_bind_text(ins, 1, f[0].c_str(), -1, SQLITE_TRANSIENT);
+            if (f[1].empty()) sqlite3_bind_null(ins, 2); else sqlite3_bind_text(ins, 2, f[1].c_str(), -1, SQLITE_TRANSIENT);
+            if (f[2].empty()) sqlite3_bind_null(ins, 3); else sqlite3_bind_text(ins, 3, f[2].c_str(), -1, SQLITE_TRANSIENT);
+            int port = atoi(f[3].c_str());   if (port)  sqlite3_bind_int(ins, 4, port);  else sqlite3_bind_null(ins, 4);
+            int proto = atoi(f[4].c_str());  if (proto) sqlite3_bind_int(ins, 5, proto); else sqlite3_bind_null(ins, 5);
+            sqlite3_bind_int(ins, 6, atoi(f[5].c_str()) ? 1 : 0);
+            double exp = atof(f[6].c_str()); if (exp > now) sqlite3_bind_double(ins, 7, exp); else sqlite3_bind_null(ins, 7);
+            if (sqlite3_step(ins) == SQLITE_DONE) ++n;
+        }
+        sqlite3_finalize(ins);
+        sqlite3_exec(d.handle(), "UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='rules_gen';", nullptr, nullptr, nullptr);
+        Notify(L"Imported " + to_hstring(n) + L" rule(s).", InfoBarSeverity::Success);
+        if (curView_ == L"rules") RefreshCurrent();
     }
 
     void MainWindow::LoadSettings()
@@ -479,7 +601,7 @@ namespace winrt::NeuralGuard::implementation
 
     void MainWindow::OnTick(IInspectable const&, IInspectable const&)
     {
-        if (resizeCol_ >= 0) return;   // don't rebuild rows mid-drag
+        if (resizeCol_ >= 0 || menuOpen_) return;   // don't rebuild mid-drag or while a menu is open
         UpdateMode();
         if (curView_ == L"live" || curView_ == L"history") RefreshCurrent();
         else if (curView_ == L"settings") RefreshServiceStatus();   // reflect install/remove
@@ -528,6 +650,10 @@ namespace winrt::NeuralGuard::implementation
             add(L"Allow this app (any port)", [this, id] { AddRuleFromEvent(id, false, true, 0); });
         }
         if (menu.Items().Size() == 0) return;
+
+        DataList().SelectedItem(row);   // highlight the row the menu acts on
+        menuOpen_ = true;               // pause the live refresh so the menu isn't torn down
+        menu.Closed([this](auto&&, auto&&) { menuOpen_ = false; });
 
         FlyoutShowOptions opt;
         opt.Position(e.GetPosition(container));
