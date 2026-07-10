@@ -285,8 +285,24 @@ namespace winrt::NeuralGuard::implementation
         }
         // (the Settings view uses a form panel, not the data table)
 
+        if (!filter_.empty())
+        {
+            std::string f = to_string(filter_);
+            for (auto& ch : f) ch = (char)tolower((unsigned char)ch);
+            rows.erase(std::remove_if(rows.begin(), rows.end(), [&](RowData const& r) {
+                for (int i = 0; i < 5; ++i)
+                {
+                    std::string c = to_string(r.c[i]);
+                    for (auto& ch : c) ch = (char)tolower((unsigned char)ch);
+                    if (c.find(f) != std::string::npos) return false;   // a column matches - keep
+                }
+                return true;   // nothing matched - drop
+            }), rows.end());
+        }
+
         if (rows.empty())
-            rows.push_back({ 0, { L"", L"", ok ? hstring(L"(no rows yet)")
+            rows.push_back({ 0, { L"", L"", !filter_.empty() ? hstring(L"(no matches)")
+                                          : ok ? hstring(L"(no rows yet)")
                                                : U8("(DB not found at " + DbPathU8() + ")"), L"", L"" } });
 
         if (sortCol_ >= 0 && sortCol_ < 5)
@@ -329,8 +345,18 @@ namespace winrt::NeuralGuard::implementation
         HeaderCard().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
         DataList().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
         SettingsPanel().Visibility(settings ? Visibility::Visible : Visibility::Collapsed);
+        SearchBox().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
+        filter_ = L"";
+        SearchBox().Text(L"");   // reset the filter when switching views
         if (settings) LoadSettings();
         else RefreshCurrent();
+    }
+
+    void MainWindow::OnSearchChanged(Controls::AutoSuggestBox const& box,
+                                     Controls::AutoSuggestBoxTextChangedEventArgs const&)
+    {
+        filter_ = box.Text();
+        if (curView_ != L"settings") RefreshCurrent();
     }
 
     void MainWindow::LoadSettings()

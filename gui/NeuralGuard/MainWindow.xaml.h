@@ -30,6 +30,8 @@ namespace winrt::NeuralGuard::implementation
         void OnAutonomyChanged(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnServiceInstall(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnServiceRemove(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnSearchChanged(winrt::Microsoft::UI::Xaml::Controls::AutoSuggestBox const&,
+                             winrt::Microsoft::UI::Xaml::Controls::AutoSuggestBoxTextChangedEventArgs const&);
 
     private:
         void LoadSettings();
@@ -66,6 +68,7 @@ namespace winrt::NeuralGuard::implementation
         int  resizeCol_{ -1 };                        // column being drag-resized, -1 = none
         double dragStartX_{ 0 }, dragStartW_{ 0 };    // drag origin (relative to ContentRoot)
         bool loadingSettings_{ false };               // suppress the autonomy handler while syncing radios
+        winrt::hstring filter_;                       // case-insensitive filter for the current table
     };
 }
 

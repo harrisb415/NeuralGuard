@@ -74,7 +74,12 @@
             </muxc:NavigationView.FooterMenuItems>
 
             <Grid x:Name="ContentRoot" Padding="24,16" RowDefinitions="Auto,Auto,*" RowSpacing="8">
-                <TextBlock Grid.Row="0" x:Name="ViewTitle" Text="Live" FontSize="24" FontWeight="SemiBold"/>
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" x:Name="ViewTitle" Text="Live" FontSize="24" FontWeight="SemiBold"
+                               VerticalAlignment="Center"/>
+                    <AutoSuggestBox Grid.Column="1" x:Name="SearchBox" Width="260" VerticalAlignment="Center"
+                                    PlaceholderText="Filter" QueryIcon="Find" TextChanged="OnSearchChanged"/>
+                </Grid>
 
                 <!-- Resizable + sortable column headers. Each header cell is a full-width
                      transparent Border (tap anywhere to sort); a visible grip on the right
