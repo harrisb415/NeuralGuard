@@ -283,11 +283,7 @@ namespace winrt::NeuralGuard::implementation
                                    U8(info), U8(ng::Db::ColText(s, 2)), L"" } });
             });
         }
-        else if (curView_ == L"settings")
-        {
-            SetHeaders(L"", L"", L"", L"", L"");
-            rows.push_back({ 0, { L"", L"", L"Autonomy + service controls port in the next phase.", L"", L"" } });
-        }
+        // (the Settings view uses a form panel, not the data table)
 
         if (rows.empty())
             rows.push_back({ 0, { L"", L"", ok ? hstring(L"(no rows yet)")
@@ -328,7 +324,91 @@ namespace winrt::NeuralGuard::implementation
         else if (tag == L"history") title = L"History";
         else if (tag == L"settings") title = L"Settings";
         ViewTitle().Text(title);
-        RefreshCurrent();
+
+        bool settings = (tag == L"settings");
+        HeaderCard().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
+        DataList().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
+        SettingsPanel().Visibility(settings ? Visibility::Visible : Visibility::Collapsed);
+        if (settings) LoadSettings();
+        else RefreshCurrent();
+    }
+
+    void MainWindow::LoadSettings()
+    {
+        loadingSettings_ = true;   // syncing the radios must not write back / toast
+        int a = ReadAutonomy();
+        Auto0().IsChecked(a == 0);
+        Auto1().IsChecked(a == 1);
+        Auto2().IsChecked(a == 2);
+        loadingSettings_ = false;
+        RefreshServiceStatus();
+    }
+
+    int MainWindow::ReadAutonomy()
+    {
+        ng::Db d;
+        if (d.open(DbPathU8().c_str()))
+        {
+            std::string v = d.scalar("SELECT v FROM meta WHERE k='autonomy';");
+            if (!v.empty()) return atoi(v.c_str());
+        }
+        return 0;
+    }
+
+    void MainWindow::WriteAutonomy(int level)
+    {
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) return;
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(d.handle(),
+            "INSERT INTO meta(k,v) VALUES('autonomy',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v;",
+            -1, &s, nullptr);
+        std::string lv = std::to_string(level);
+        sqlite3_bind_text(s, 1, lv.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(s); sqlite3_finalize(s);
+    }
+
+    void MainWindow::OnAutonomyChanged(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        if (loadingSettings_) return;
+        int level = TagInt(sender);
+        WriteAutonomy(level);   // enforce daemon re-reads meta('autonomy') live per drop
+        hstring msg = level == 0 ? L"Autonomy: prompt on every new connection."
+                    : level == 1 ? L"Autonomy: auto-allow apps you already use."
+                                 : L"Autonomy: auto-allow everything (log only).";
+        Notify(msg, InfoBarSeverity::Success);
+    }
+
+    void MainWindow::RefreshServiceStatus()
+    {
+        hstring text = L"Not installed.";
+        if (SC_HANDLE scm = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT))
+        {
+            if (SC_HANDLE svc = OpenServiceW(scm, L"NeuralGuard", SERVICE_QUERY_STATUS))
+            {
+                SERVICE_STATUS st{};
+                if (QueryServiceStatus(svc, &st))
+                    text = (st.dwCurrentState == SERVICE_RUNNING) ? hstring(L"Installed and running.")
+                                                                  : hstring(L"Installed (stopped).");
+                else
+                    text = L"Installed.";
+                CloseServiceHandle(svc);
+            }
+            CloseServiceHandle(scm);
+        }
+        SvcStatus().Text(text);
+    }
+
+    void MainWindow::OnServiceInstall(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (RunTool(L"ngd.exe", L"install \"" + NgDir() + L"\\ngpolicy.db\""))
+            Notify(L"Installing the NeuralGuard service...", InfoBarSeverity::Informational);
+    }
+
+    void MainWindow::OnServiceRemove(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (RunTool(L"ngd.exe", L"uninstall"))
+            Notify(L"Removing the NeuralGuard service...", InfoBarSeverity::Informational);
     }
 
     // ngd/ngctl manage WFP filters, which needs administrator rights. If this
@@ -376,6 +456,7 @@ namespace winrt::NeuralGuard::implementation
         if (resizeCol_ >= 0) return;   // don't rebuild rows mid-drag
         UpdateMode();
         if (curView_ == L"live" || curView_ == L"history") RefreshCurrent();
+        else if (curView_ == L"settings") RefreshServiceStatus();   // reflect install/remove
     }
 
     void MainWindow::OnNavChanged(NavigationView const&, NavigationViewSelectionChangedEventArgs const& e)

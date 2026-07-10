@@ -27,8 +27,15 @@ namespace winrt::NeuralGuard::implementation
                             winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const&);
         void OnContainerChanging(winrt::Microsoft::UI::Xaml::Controls::ListViewBase const&,
                                  winrt::Microsoft::UI::Xaml::Controls::ContainerContentChangingEventArgs const&);
+        void OnAutonomyChanged(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnServiceInstall(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnServiceRemove(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
 
     private:
+        void LoadSettings();
+        void RefreshServiceStatus();
+        int  ReadAutonomy();
+        void WriteAutonomy(int level);
         void AddRuleFromEvent(int64_t eventId, bool block, bool useApp, int ttlSeconds);
         void DelRule(int64_t ruleId);
         void ApplyHeaderText();
@@ -58,6 +65,7 @@ namespace winrt::NeuralGuard::implementation
         bool sortAsc_{ true };
         int  resizeCol_{ -1 };                        // column being drag-resized, -1 = none
         double dragStartX_{ 0 }, dragStartW_{ 0 };    // drag origin (relative to ContentRoot)
+        bool loadingSettings_{ false };               // suppress the autonomy handler while syncing radios
     };
 }
 

@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <shellapi.h>   // ShellExecuteExW (elevated tool launch)
 #pragma comment(lib, "Shell32.lib")
+#pragma comment(lib, "Advapi32.lib")   // service control manager (Settings tab)
 #include <unknwn.h>
 #include <restrictederrorinfo.h>
 #include <hstring.h>

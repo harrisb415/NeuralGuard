@@ -79,7 +79,7 @@
                 <!-- Resizable + sortable column headers. Each header cell is a full-width
                      transparent Border (tap anywhere to sort); a visible grip on the right
                      edge drags to resize. -->
-                <Border Grid.Row="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                <Border Grid.Row="1" x:Name="HeaderCard" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         CornerRadius="4" Padding="12,0,0,0">
                     <Grid x:Name="HeaderRow" Height="34">
                         <Grid.ColumnDefinitions>
@@ -166,6 +166,34 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
+
+                <!-- Settings form (shown instead of the data table for the Settings view). -->
+                <ScrollViewer Grid.Row="2" x:Name="SettingsPanel" Visibility="Collapsed"
+                              VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="24" MaxWidth="620" HorizontalAlignment="Left" Margin="0,4,0,0">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Autonomy" FontSize="18" FontWeight="SemiBold"/>
+                            <TextBlock Text="What NeuralGuard does when an app makes a new outbound connection while enforcing."
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                            <RadioButton x:Name="Auto0" Tag="0" GroupName="autonomy" Checked="OnAutonomyChanged"
+                                         Content="Prompt me on every new connection"/>
+                            <RadioButton x:Name="Auto1" Tag="1" GroupName="autonomy" Checked="OnAutonomyChanged"
+                                         Content="Auto-allow apps I already use, prompt for the rest"/>
+                            <RadioButton x:Name="Auto2" Tag="2" GroupName="autonomy" Checked="OnAutonomyChanged"
+                                         Content="Auto-allow everything (log only, no prompts)"/>
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Background service" FontSize="18" FontWeight="SemiBold"/>
+                            <TextBlock Text="Run enforcement as a Windows service (LocalSystem, auto-start) so it keeps guarding after you log off or reboot."
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                            <TextBlock x:Name="SvcStatus" Text="Checking..." FontWeight="SemiBold"/>
+                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                <Button Content="Install service" Click="OnServiceInstall" Style="{StaticResource AccentButtonStyle}"/>
+                                <Button Content="Remove service" Click="OnServiceRemove"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
 
                 <!-- Transient status toast (auto-dismisses); floats centred at the
                      bottom over the list. Severity fill brushes are overridden to
