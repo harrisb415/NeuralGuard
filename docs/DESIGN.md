@@ -207,23 +207,86 @@ do not exist yet. Instead the model runs **asynchronously on completed flows**,
 where those features are real and fully populated — so training data and serving
 data are the same shape, and the train/serve skew is gone.
 
-Its outputs feed back into the habit store, not the packet path:
+Two models, not one, because they cover different blind spots:
 
-- **Block-next-time proposals.** A finished flow that scores malicious (C2-beaconing
-  regularity, slow exfil byte ratios, port-scan fan-out) produces a proposed
-  *demotion* of that habit key. Applied via the promotion job behind a confidence
-  gate (§5).
-- **Anomaly flags.** An unsupervised scorer (e.g. Isolation Forest) gives a second,
-  label-free opinion; high anomaly + low supervised confidence = escalate to a
-  review item rather than a silent decision.
-- **Weekly digest.** "Here's what changed in your network life this week; here are
-  3 things that look off." A natural, *offline, advisory-only* place for an LLM to
-  summarize — it explains, it never enforces.
+- **Supervised classifier** — trained off-device on a public IDS dataset (CICIDS2017
+  or CTU-13) for the malicious classes, plus (once accumulated) your own labeled
+  feedback (§6.2). Catches *known* attack patterns: C2-beaconing regularity, slow
+  exfil byte ratios, port-scan fan-out.
+- **Unsupervised anomaly scorer** (Isolation Forest) — trained *only* on your own
+  archived flows. Needs no external data and no labels; it just answers "does this
+  look like anything you've ever done before." Catches deviations the supervised
+  model was never trained to recognize.
 
-Model: gradient-boosted trees (LightGBM → ONNX) as the primary, exported and run via
-ONNX Runtime CPU EP. Trained off-device on your own archived completed-flow features
-plus a public IDS dataset for the malicious classes. Small, fast, explainable via
-feature importances.
+High supervised-malicious confidence on a currently-trusted habit → a proposed
+*demotion*, applied via the promotion job (§5) behind a confidence gate. High
+anomaly alone, with low supervised confidence → not a silent decision — it escalates
+to a review item (dashboard flag / weekly digest), because a label-free score by
+itself isn't grounds to touch a rule.
+
+### 6.1 Feature vector — what's solid, what needs a spike
+
+User mode has no packet payload, so every feature is metadata:
+
+| Feature | Source | Confidence |
+|---------|--------|------------|
+| Destination fan-out, time-of-day/day-of-week deviation | Already computed — `habits` histograms (§5) | Solid |
+| Process trust tier (signed / catalog-signed / unsigned) | Already computed — `identity` (§4) | Solid |
+| Destination novelty (domain/ASN never seen, or rare) | Already computed — novelty score (§5) | Solid |
+| Connection timing / inter-arrival regularity (beaconing) | Derivable from repeated `flow_events` rows for the same habit key | Solid |
+| Flow duration | Time between the connect event and the connection disappearing from the TCP table (`GetExtendedTcpTable` polling) | Probably solid, needs verification |
+| Bytes sent/received per flow | **Open question.** WFP net events don't carry byte counts; per-connection byte accounting in pure user mode likely means `GetPerTcpConnectionEStats` (Extended TCP Statistics), which isn't enabled by default and may need to be turned on per-connection or system-wide. Untested. | **Needs a spike before committing to it as a feature** |
+
+If the byte-count spike doesn't pan out cleanly, the plan still works with
+duration + timing + fan-out + trust + novelty — that's most of a NetFlow-style
+feature set already, just without the volume dimension. Don't block the rest of
+Phase 4 on it.
+
+### 6.2 The feedback loop
+
+Every prompt decision you make (Allow once / Always allow / Block) is a labeled
+example — you telling the system, in real time, what the right call was for that
+exact feature vector. Each one is written to a `feedback_labels` table (the flow's
+feature snapshot + your decision + timestamp), separate from `flow_events`/`habits`
+so it's clearly purpose-built for retraining, not conflated with the operational
+tables.
+
+**Be honest about its shape.** Phases 2–3 exist specifically to make prompts rare
+once your baseline settles — which means this dataset accumulates *slowly*, by
+design, and precisely because the rest of the system is working. It's realistically
+a small, slow-growing set best used to **recalibrate thresholds and catch
+personal-environment drift** over months, not a fast feedback loop that retrains a
+meaningfully different classifier week to week. Size expectations accordingly.
+
+Retraining is a **manual** offline step (a script you run yourself against the
+public dataset plus whatever's accumulated in `feedback_labels`), not an automated
+pipeline — there's no infrastructure here to auto-deploy a model that scores worse
+than the one it replaced, and a solo personal tool doesn't need one yet.
+
+### 6.3 Shadow mode — the same rollout pattern as enforcement itself
+
+Phase 2 didn't ship a blocking filter until the panic switch existed first. Phase 4
+follows the identical pattern: both models compute and log scores for every
+completed flow as soon as they're wired up, visible in the dashboard/CLI, but
+**take zero action** until a `meta('ml_mode')` flag is explicitly flipped from
+`shadow` to `active` — which stays `shadow` by default even across an upgrade. This
+is the window where you sanity-check the scorers against weeks of your own real
+traffic before they're allowed to touch a single rule.
+
+### 6.4 Data governance
+
+Feature archival (§6.1) is **opt-in** (off by default) and **auto-purged** after a
+configurable retention window. `feedback_labels` follows the same policy. The only
+data that ever leaves the machine is nothing — training happens **on the dev host**,
+using the **public** IDS dataset (which contains none of your traffic) plus
+whatever archive/feedback tables you've chosen to accumulate locally; the trained
+model is a static artifact you copy back, and inference happens entirely on-device.
+
+Model: gradient-boosted trees (LightGBM → ONNX) as the supervised primary, Isolation
+Forest → ONNX as the anomaly scorer, both run via ONNX Runtime CPU EP. Both are
+small enough as tree ensembles that INT8 quantization isn't the relevant lever the
+way it would be for a neural net — worth revisiting only if model size ever
+actually becomes a problem.
 
 ## 7. What we measure (fix #3)
 

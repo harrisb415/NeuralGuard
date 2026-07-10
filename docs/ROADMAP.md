@@ -177,15 +177,46 @@ blocks and a manageable prompt rate.
 ## Phase 4 — ML on completed flows
 
 **Goal:** the "AI" earns its name, correctly — scoring finished flows, not SYNs.
+See [`DESIGN.md` §6](DESIGN.md#6-where-ml-actually-lives-phase-4) for the full
+architecture (two-model design, feature vector, the feedback loop, shadow-mode
+rollout, data governance). Planned, not started — every item below is ⬜.
 
-- Archive completed-flow feature vectors (opt-in, auto-purged) for training data.
-- Off-device training pipeline: completed-flow features + a public IDS dataset for
-  malicious classes → LightGBM → ONNX (INT8).
-- In `ngd`: ONNX Runtime CPU session scores completed flows asynchronously; outputs
-  become **block-next-time proposals** and **anomaly flags** feeding the Phase-3
-  promotion job behind a confidence gate.
-- Optional: an offline LLM turns the weekly digest into prose and highlights the few
-  things worth a human look. Advisory only — it never enforces.
+- ⬜ **4a. Feature archival + flow-completion detection.** Opt-in (off by default),
+  auto-purged `flow_features` table. Spike the open question first: byte-count
+  accounting per flow in pure user mode (`GetPerTcpConnectionEStats`, untested) —
+  don't let it block 4b/4c, which don't need it. Deliverable: `ngd features dump`
+  shows real archived vectors, no ML involved yet.
+- ⬜ **4b. Anomaly scorer (unsupervised, no external data).** Isolation Forest
+  trained solely on your own archived flows → ONNX. `ngd` scores completed flows
+  asynchronously in **shadow mode only** (logged, visible, zero effect on any
+  rule). Deliverable: you can watch anomaly scores against real traffic for weeks
+  before they're allowed to matter.
+- ⬜ **4c. Supervised classifier (public dataset).** Map CICIDS2017 or CTU-13's
+  feature schema onto the subset we can actually compute ourselves (drop anything
+  needing payload access). Off-device LightGBM → ONNX. Scored alongside the
+  anomaly model, still shadow mode.
+- ⬜ **4d. Confidence gate + promotion/demotion wiring.** `meta('ml_mode')`
+  shadow→active switch (defaults to shadow, even across upgrades). High
+  supervised-malicious confidence on a trusted habit → proposed demotion via the
+  existing promotion job (falls to provisional → default-deny → prompts once, same
+  mechanism as any other provisional key, no new enforcement primitive). Anomaly
+  alone never auto-demotes — it's a review flag, not a verdict.
+- ⬜ **4e. The feedback loop.** Every prompt decision (Allow once / Always allow /
+  Block) becomes a labeled example in `feedback_labels`. A manual retraining script
+  folds these into the next offline LightGBM run alongside the public dataset. Set
+  expectations correctly: prompts get rare as Phases 2–3 do their job, so this
+  dataset grows slowly *by design* — it's for periodic recalibration against your
+  own environment, not a fast-turnaround feedback loop.
+- ⬜ **4f. Weekly digest + optional LLM narration.** Surfaces anomaly/supervised
+  flags in the still-open Phase-3 weekly digest delivery item. An offline LLM may
+  turn it into prose — advisory only, it never enforces.
+
+**Real open risks, not hidden:** the public dataset is enterprise/lab traffic, not
+one person's home network — expect a real transfer gap and don't trust 4c's scores
+until shadow mode has proven it out against your own traffic. Byte-count features
+(4a) may simply not be available without a spike into ESTATS. No auto-retraining
+pipeline exists or is planned for v1 — model staleness is managed by you, manually,
+on your own schedule.
 
 ## Phase 5 — (Optional) kernel callout driver
 
