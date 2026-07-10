@@ -1,7 +1,11 @@
 # NeuralGuard
 
-**v1.0.0** — A personal, habit-learning firewall for Windows 11 — built the
+**v1.1.0** — A personal, habit-learning firewall for Windows 11 — built the
 buildable way.
+
+**[⬇ Download the installer](https://github.com/harrisb415/NeuralGuard/releases/latest)**
+— `NeuralGuard-Setup-*.exe`, no build tools required. Prefer to build it
+yourself? See [`docs/INSTALL.md`](docs/INSTALL.md).
 
 NeuralGuard watches how *you* use the network, learns your normal, and quietly
 blocks the stuff that doesn't fit. It is designed to be built and run by one
@@ -12,8 +16,7 @@ person on their own machine, not by a team shipping a signed kernel product.
 > Windows service, and a WinUI 3 control dashboard (`gui/`) are all working
 > end to end. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for what's left
 > (ML scoring, the optional kernel driver) and [`CHANGELOG.md`](CHANGELOG.md)
-> for what shipped in this release. **New here?** Start with
-> [`docs/INSTALL.md`](docs/INSTALL.md).
+> for what shipped in each release.
 
 ---
 

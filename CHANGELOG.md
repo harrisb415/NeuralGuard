@@ -5,6 +5,31 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-07-10
+
+### Added
+
+- **Installer** — a proper Windows installer (`installer/NeuralGuard.iss`,
+  Inno Setup), built by `scripts/package.ps1` alongside the engine and
+  dashboard. Installs per-user (no admin prompt at install time), creates
+  Start Menu shortcuts, offers to launch NeuralGuard at login, and registers
+  a normal Add/Remove Programs uninstaller. Uninstalling stops the tray
+  and dashboard, removes the background service if installed, and clears
+  any active enforcement filters (each elevated individually, since the
+  installer itself intentionally never requires admin) before deleting
+  files, so an uninstall can't leave a stray service or a stuck block
+  behind. Download `NeuralGuard-Setup-1.1.0.exe` from the
+  [releases page](https://github.com/harrisb415/NeuralGuard/releases).
+
+### Fixed
+
+- The dashboard's `NgDir()` (used to locate `ngd.exe`/`ngctl.exe` and the
+  policy database) was hardcoded to `%USERPROFILE%\NeuralGuard`, so the
+  install location wasn't actually free to be anything else. It's now
+  derived from the dashboard's own module path — the app works wherever
+  it's installed, including the arbitrary folder a user picks in the new
+  installer.
+
 ## [1.0.0] - 2026-07-10
 
 First tagged release. Phases 0–2 of [`docs/ROADMAP.md`](docs/ROADMAP.md) are

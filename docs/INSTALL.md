@@ -1,13 +1,39 @@
 # Installing NeuralGuard
 
-NeuralGuard isn't distributed as a signed installer — it's a personal, solo-built
-tool you compile yourself and run on your own machine. This guide covers building
-it from source and getting it running, end to end.
-
 If you haven't yet, read the **Safety, up front** section of the
 [README](../README.md) before enabling enforcement. Develop and test against a
 VM until you trust it; a firewall bug on your only machine can lock you out of
 the fix.
+
+## Option A: the installer (recommended)
+
+Download `NeuralGuard-Setup-*.exe` from the
+[latest release](https://github.com/harrisb415/NeuralGuard/releases/latest)
+and run it. It:
+
+- installs per-user under your own profile (no Administrator prompt at
+  install time — only the actions that genuinely need it, like turning on
+  enforcement or the background service, elevate individually, when used),
+- adds a Start Menu entry and a normal Add/Remove Programs uninstaller,
+- optionally starts the NeuralGuard tray icon at login (unchecked by
+  default — opt in during setup).
+
+**The installer isn't code-signed** (that's a paid certificate this personal
+project doesn't carry — see "What it is not" in the README). Windows
+SmartScreen will likely warn that it's from an unrecognized publisher the
+first time you run it. That's expected: click **More info → Run anyway**, or
+build it yourself from source (Option B) if you'd rather not.
+
+Uninstalling stops NeuralGuard, removes the background service if you
+installed it, and clears any active firewall rules before deleting files —
+you won't be left with an orphaned service or a stuck block.
+
+## Option B: build it yourself
+
+NeuralGuard is a personal, solo-built tool; nothing stops you from compiling
+it yourself instead of trusting a downloaded binary. This is also how you'd
+package your own installer via `scripts/package.ps1` (see the end of this
+guide).
 
 ## What you end up with
 
@@ -161,7 +187,25 @@ first so the files aren't locked). `ngpolicy.db` is untouched by an update.
 
 ## Uninstalling
 
+If you used the installer (Option A), use **Add/Remove Programs** — it
+handles all of the below automatically. Otherwise, manually:
+
 1. If the service is installed: `ngd.exe uninstall`.
 2. `ngctl.exe panic` (belt and suspenders — clears any stray filters).
 3. Quit the tray icon and close the dashboard.
 4. Delete the install folder.
+
+## Building your own installer
+
+If you'd rather hand someone (or yourself) a single `Setup.exe` instead of
+the manual copy in step 4, install [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install JRSoftware.InnoSetup`), then:
+
+```powershell
+powershell -File scripts\package.ps1
+```
+
+This builds the engine and dashboard (steps 2–3 above), stages them, and
+compiles `installer\NeuralGuard.iss` into `dist\NeuralGuard-Setup-<version>.exe`
+— the same installer described in Option A, versioned from `CMakeLists.txt`'s
+`project(NeuralGuard VERSION ...)`.

@@ -174,12 +174,20 @@ namespace winrt::NeuralGuard::implementation
         ApplyHeaderText();
     }
 
+    // The dashboard always lives in a "dashboard\" subfolder of the install
+    // root (ngd.exe, ngctl.exe, and ngpolicy.db live one level up - see
+    // ngtray's ExeDir()+"\\dashboard" convention). Derive that root from our
+    // own module path instead of assuming a fixed %USERPROFILE%\NeuralGuard
+    // location, so the app works wherever it's installed.
     std::wstring MainWindow::NgDir()
     {
-        wchar_t buf[MAX_PATH]{};
-        DWORD n = GetEnvironmentVariableW(L"USERPROFILE", buf, MAX_PATH);
-        std::wstring home = n ? std::wstring(buf, n) : std::wstring(L"C:\\Users\\Public");
-        return home + L"\\NeuralGuard";
+        wchar_t path[MAX_PATH]{};
+        GetModuleFileNameW(nullptr, path, MAX_PATH);
+        std::wstring dir(path);
+        size_t p = dir.find_last_of(L"\\/");
+        dir = (p == std::wstring::npos) ? L"." : dir.substr(0, p);          // ...\dashboard
+        size_t q = dir.find_last_of(L"\\/");
+        return (q == std::wstring::npos) ? dir : dir.substr(0, q);          // install root
     }
 
     std::string MainWindow::DbPathU8()
