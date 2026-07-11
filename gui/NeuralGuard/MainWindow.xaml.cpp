@@ -311,7 +311,55 @@ namespace winrt::NeuralGuard::implementation
                 rows.push_back({ 0, { U8(tm), U8(ng::Db::ColText(s, 1)), U8(dest), U8(anom), U8(mal) } });
             });
         }
-        // (the Settings view uses a form panel, not the data table)
+        else if (curView_ == L"flags")
+        {
+            // Phase 4d: active-mode demotions + anomaly review flags. Right-click a
+            // row to remove it; "Clear all flags" is in the toolbar.
+            SetHeaders(L"Time", L"Kind", L"Score", L"Application", L"Destination");
+            if (ok) d.each("SELECT id, ts_utc, kind, printf('%.2f', score), COALESCE(process_label,''),"
+                           " COALESCE(dest,'')||':'||remote_port FROM ml_flags ORDER BY id DESC LIMIT 500;",
+                           [&](sqlite3_stmt* s) {
+                std::string ts = ng::Db::ColText(s, 1);
+                std::string tm = ts.size() >= 19 ? ts.substr(11, 8) : ts;
+                rows.push_back({ sqlite3_column_int64(s, 0),
+                                 { U8(tm), U8(ng::Db::ColText(s, 2)), U8(ng::Db::ColText(s, 3)),
+                                   U8(ng::Db::ColText(s, 4)), U8(ng::Db::ColText(s, 5)) } });
+            });
+        }
+        else if (curView_ == L"feedback")
+        {
+            // Phase 4e: prompt verdicts as training labels (read-only view).
+            SetHeaders(L"Time", L"Decision", L"Label", L"Application", L"Destination");
+            if (ok) d.each("SELECT ts_utc, decision, CASE label WHEN 1 THEN 'malicious' ELSE 'benign' END,"
+                           " COALESCE(process_label,''), COALESCE(dest,'')||':'||remote_port"
+                           " FROM feedback_labels ORDER BY id DESC LIMIT 500;", [&](sqlite3_stmt* s) {
+                std::string ts = ng::Db::ColText(s, 0);
+                std::string tm = ts.size() >= 19 ? ts.substr(11, 8) : ts;
+                rows.push_back({ 0, { U8(tm), U8(ng::Db::ColText(s, 1)), U8(ng::Db::ColText(s, 2)),
+                                      U8(ng::Db::ColText(s, 3)), U8(ng::Db::ColText(s, 4)) } });
+            });
+        }
+        else if (curView_ == L"baseline")
+        {
+            // Phase 4d: the stable (app, port) permits enforce would install, with
+            // each one's demote state. Right-click to distrust / re-trust an app.
+            SetHeaders(L"Port", L"Conns", L"State", L"Application", L"");
+            if (ok) d.each(
+                "SELECT fe.remote_port, COUNT(DISTINCT fe.local_port||'|'||fe.remote_addr) AS conns,"
+                " EXISTS(SELECT 1 FROM ml_flags m WHERE m.kind='demote' AND m.app_path=pi.image_path"
+                "   AND m.remote_port=fe.remote_port AND m.protocol=fe.protocol) AS demoted, pi.image_path"
+                " FROM flow_events fe JOIN process_identity pi ON fe.image_id=pi.id"
+                " WHERE fe.remote_port>0 AND fe.remote_port<49152 AND pi.image_path LIKE '_:\\%'"
+                "   AND fe.verdict IN ('ALLOW','CAPALLOW')"
+                " GROUP BY pi.image_path, fe.protocol, fe.remote_port HAVING conns>=3"
+                " ORDER BY demoted DESC, conns DESC LIMIT 500;", [&](sqlite3_stmt* s) {
+                bool demoted = sqlite3_column_int(s, 2) != 0;
+                rows.push_back({ 0, { to_hstring(sqlite3_column_int(s, 0)), to_hstring(sqlite3_column_int(s, 1)),
+                                      demoted ? hstring(L"DEMOTED") : hstring(L"permitted"),
+                                      U8(ng::Db::ColText(s, 3)), L"" } });
+            });
+        }
+        // (the Settings and Digest views use their own panels, not the data table)
 
         if (!filter_.empty())
         {
@@ -385,18 +433,28 @@ namespace winrt::NeuralGuard::implementation
         else if (tag == L"apps") title = L"Per-app";
         else if (tag == L"history") title = L"History";
         else if (tag == L"flows") title = L"Flows";
+        else if (tag == L"flags") title = L"Flags";
+        else if (tag == L"baseline") title = L"Baseline";
+        else if (tag == L"feedback") title = L"Feedback";
+        else if (tag == L"digest") title = L"Digest";
         else if (tag == L"settings") title = L"Settings";
         ViewTitle().Text(title);
 
         bool settings = (tag == L"settings");
-        HeaderCard().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
-        DataList().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
+        bool digest = (tag == L"digest");
+        bool table = !settings && !digest;   // the shared sortable data table
+        HeaderCard().Visibility(table ? Visibility::Visible : Visibility::Collapsed);
+        DataList().Visibility(table ? Visibility::Visible : Visibility::Collapsed);
         SettingsPanel().Visibility(settings ? Visibility::Visible : Visibility::Collapsed);
-        SearchBox().Visibility(settings ? Visibility::Collapsed : Visibility::Visible);
+        DigestPanel().Visibility(digest ? Visibility::Visible : Visibility::Collapsed);
+        SearchBox().Visibility(table ? Visibility::Visible : Visibility::Collapsed);
         RulesTools().Visibility((tag == L"rules") ? Visibility::Visible : Visibility::Collapsed);
+        FlagsTools().Visibility((tag == L"flags") ? Visibility::Visible : Visibility::Collapsed);
+        FeedbackTools().Visibility((tag == L"feedback") ? Visibility::Visible : Visibility::Collapsed);
         filter_ = L"";
         SearchBox().Text(L"");   // reset the filter when switching views
         if (settings) LoadSettings();
+        else if (digest) BuildDigest();
         else RefreshCurrent();
     }
 
@@ -520,6 +578,8 @@ namespace winrt::NeuralGuard::implementation
         Ml0().IsChecked(mode == "off");
         Ml1().IsChecked(mode == "shadow");
         Ml2().IsChecked(mode == "active");
+        MalThresh().Value(std::strtod(MetaGet("ml_malicious_threshold", "0.9").c_str(), nullptr));
+        AnomThresh().Value(std::strtod(MetaGet("ml_anomaly_threshold", "-0.15").c_str(), nullptr));
         loadingSettings_ = false;
         RefreshServiceStatus();
     }
@@ -603,6 +663,167 @@ namespace winrt::NeuralGuard::implementation
                    L"Use trained models, not the placeholders.", InfoBarSeverity::Warning);
         else
             Notify(L"ML scoring mode: " + to_hstring(mode) + L".", InfoBarSeverity::Success);
+    }
+
+    void MainWindow::OnMlThresholdChanged(Controls::NumberBox const& sender,
+                                          Controls::NumberBoxValueChangedEventArgs const&)
+    {
+        if (loadingSettings_) return;
+        double v = sender.Value();
+        if (v != v) return;   // NaN = the box was cleared; ignore
+        char buf[32]; snprintf(buf, sizeof buf, "%.3f", v);
+        MetaSet(sender.Name() == L"MalThresh" ? "ml_malicious_threshold" : "ml_anomaly_threshold", buf);
+        Notify(L"Confidence gate updated (takes effect next time enforcement runs).", InfoBarSeverity::Success);
+    }
+
+    void MainWindow::OnClearFlags(IInspectable const&, RoutedEventArgs const&)
+    {
+        ClearMlFlags();
+        if (curView_ == L"flags" || curView_ == L"baseline") RefreshCurrent();
+    }
+
+    void MainWindow::OnExportFeedback(IInspectable const&, RoutedEventArgs const&)
+    {
+        wchar_t file[MAX_PATH] = L"neuralguard-feedback.csv";
+        OPENFILENAMEW ofn{}; ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = WindowHandle();
+        ofn.lpstrFilter = L"CSV (*.csv)\0*.csv\0All files\0*.*\0";
+        ofn.lpstrFile = file; ofn.nMaxFile = MAX_PATH;
+        ofn.lpstrDefExt = L"csv";
+        ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (!GetSaveFileNameW(&ofn)) return;
+
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) { Notify(L"Couldn't open the policy database.", InfoBarSeverity::Error); return; }
+        std::string out = "duration_ms,bytes_in,bytes_out,remote_port,label\r\n";
+        int n = 0;
+        d.each("SELECT COALESCE(MAX(ff.duration_ms),0), COALESCE(MAX(ff.bytes_in),0),"
+               " COALESCE(MAX(ff.bytes_out),0), fl.remote_port, fl.label FROM feedback_labels fl"
+               " LEFT JOIN flow_features ff ON ff.process_key=fl.process_key AND ff.dest=fl.dest"
+               "   AND ff.remote_port=fl.remote_port GROUP BY fl.id;", [&](sqlite3_stmt* s) {
+            out += std::to_string(sqlite3_column_int(s, 0)) + "," +
+                   std::to_string(sqlite3_column_int64(s, 1)) + "," +
+                   std::to_string(sqlite3_column_int64(s, 2)) + "," +
+                   std::to_string(sqlite3_column_int(s, 3)) + "," +
+                   std::to_string(sqlite3_column_int(s, 4)) + "\r\n";
+            ++n;
+        });
+        HANDLE h = CreateFileW(file, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) { Notify(L"Couldn't write that file.", InfoBarSeverity::Error); return; }
+        DWORD wr = 0; WriteFile(h, out.data(), (DWORD)out.size(), &wr, nullptr); CloseHandle(h);
+        Notify(L"Exported " + to_hstring(n) + L" label(s).", InfoBarSeverity::Success);
+    }
+
+    // Direct-DB helpers (same pattern as the rules editor: write + bump rules_gen
+    // so a running enforce daemon re-applies the baseline live).
+    void MainWindow::DemoteApp(hstring const& appPath, int port)
+    {
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) return;
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(d.handle(),
+            "INSERT OR IGNORE INTO ml_flags(ts_utc,kind,process_key,process_label,app_path,dest,"
+            "remote_port,protocol,score) VALUES(strftime('%Y-%m-%dT%H:%M:%SZ','now'),'demote','',"
+            "'(manual)',?,'(manual)',?,6,1.0);", -1, &s, nullptr);
+        std::string p = to_string(appPath);
+        sqlite3_bind_text(s, 1, p.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(s, 2, port);
+        sqlite3_step(s); sqlite3_finalize(s);
+        sqlite3_exec(d.handle(), "UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='rules_gen';", nullptr, nullptr, nullptr);
+        Notify(L"Demoted - it will prompt on its next connection.", InfoBarSeverity::Success);
+    }
+
+    void MainWindow::RetrustApp(hstring const& appPath, int port)
+    {
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) return;
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(d.handle(),
+            "DELETE FROM ml_flags WHERE kind='demote' AND app_path=? AND remote_port=?;", -1, &s, nullptr);
+        std::string p = to_string(appPath);
+        sqlite3_bind_text(s, 1, p.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(s, 2, port);
+        sqlite3_step(s); sqlite3_finalize(s);
+        sqlite3_exec(d.handle(), "UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='rules_gen';", nullptr, nullptr, nullptr);
+        Notify(L"Re-trusted - it auto-permits again next time enforcement runs.", InfoBarSeverity::Success);
+    }
+
+    void MainWindow::RemoveFlag(int64_t id)
+    {
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) return;
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(d.handle(), "DELETE FROM ml_flags WHERE id=?;", -1, &s, nullptr);
+        sqlite3_bind_int64(s, 1, id);
+        sqlite3_step(s); sqlite3_finalize(s);
+        sqlite3_exec(d.handle(), "UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='rules_gen';", nullptr, nullptr, nullptr);
+        Notify(L"Flag removed.", InfoBarSeverity::Success);
+    }
+
+    void MainWindow::ClearMlFlags()
+    {
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) return;
+        sqlite3_exec(d.handle(), "DELETE FROM ml_flags;", nullptr, nullptr, nullptr);
+        sqlite3_exec(d.handle(), "UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='rules_gen';", nullptr, nullptr, nullptr);
+        Notify(L"Cleared all ML flags; demoted apps are trusted again.", InfoBarSeverity::Success);
+    }
+
+    // Phase 4f: build the weekly digest text (the CLI `ngd digest`, in the GUI).
+    void MainWindow::BuildDigest()
+    {
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) { DigestText().Text(L"(policy database not found)"); return; }
+        std::string out = "=== NeuralGuard digest ===\r\n\r\n";
+        d.each("SELECT (SELECT count(*) FROM habits),(SELECT count(DISTINCT process_label) FROM habits),"
+               "(SELECT count(DISTINCT dest) FROM habits),(SELECT count(*) FROM flow_events);",
+               [&](sqlite3_stmt* s) {
+            out += "habits=" + std::to_string(sqlite3_column_int(s, 0)) + "  apps=" +
+                   std::to_string(sqlite3_column_int(s, 1)) + "  destinations=" +
+                   std::to_string(sqlite3_column_int(s, 2)) + "  events=" +
+                   std::to_string(sqlite3_column_int(s, 3)) + "\r\n";
+        });
+        d.each("SELECT count(*) FROM (SELECT 1 FROM flow_events fe JOIN process_identity pi ON fe.image_id=pi.id"
+               " WHERE fe.remote_port>0 AND fe.remote_port<49152 AND pi.image_path LIKE '_:\\%'"
+               " AND fe.verdict IN('ALLOW','CAPALLOW') GROUP BY pi.image_path,fe.protocol,fe.remote_port"
+               " HAVING COUNT(DISTINCT fe.local_port||'|'||fe.remote_addr)>=3);", [&](sqlite3_stmt* s) {
+            out += "baseline: " + std::to_string(sqlite3_column_int(s, 0)) + " stable (app,port) permits\r\n";
+        });
+        d.each("SELECT count(*) FROM ml_flags WHERE kind='demote';", [&](sqlite3_stmt* s) {
+            int n = sqlite3_column_int(s, 0);
+            if (n) out += "  (" + std::to_string(n) + " currently demoted)\r\n";
+        });
+
+        auto section = [&](const char* title, const char* sql) {
+            out += "\r\n"; out += title; out += "\r\n";
+            int n = 0;
+            d.each(sql, [&](sqlite3_stmt* s) {
+                out += "  ";
+                int cols = sqlite3_column_count(s);
+                for (int i = 0; i < cols; ++i) { if (i) out += "  "; out += ng::Db::ColText(s, i); }
+                out += "\r\n"; ++n;
+            });
+            if (!n) out += "  (none)\r\n";
+        };
+        section("-- new in the last 7 days --",
+            "SELECT process_label, dest||':'||remote_port, first_seen FROM habits"
+            " WHERE first_seen >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-7 days')"
+            " ORDER BY first_seen DESC LIMIT 12;");
+        section("-- ML demotions / review flags --",
+            "SELECT kind, process_label, dest||':'||remote_port, printf('%.2f',score)"
+            " FROM ml_flags ORDER BY id DESC LIMIT 10;");
+        section("-- most suspicious flows (P(malicious)) --",
+            "SELECT printf('%.2f',malicious_score), process_label, dest||':'||remote_port"
+            " FROM flow_features WHERE malicious_score IS NOT NULL ORDER BY malicious_score DESC, id DESC LIMIT 8;");
+        section("-- most anomalous flows --",
+            "SELECT printf('%.3f',anomaly_score), process_label, dest||':'||remote_port"
+            " FROM flow_features WHERE anomaly_score IS NOT NULL ORDER BY anomaly_score ASC, id DESC LIMIT 8;");
+        d.each("SELECT count(*), sum(CASE WHEN label=1 THEN 1 ELSE 0 END) FROM feedback_labels;", [&](sqlite3_stmt* s) {
+            out += "\r\n-- feedback --\r\n  " + std::to_string(sqlite3_column_int(s, 0)) + " verdict(s), " +
+                   std::to_string(sqlite3_column_int(s, 1)) + " blocked\r\n";
+        });
+        out += "\r\n(Advisory summary. Nothing here enforced on its own.)\r\n";
+        DigestText().Text(U8(out));
     }
 
     void MainWindow::RefreshServiceStatus()
@@ -703,7 +924,7 @@ namespace winrt::NeuralGuard::implementation
         }
         if (!container) return;
         auto row = DataList().ItemFromContainer(container).try_as<NeuralGuard::Row>();
-        if (!row || row.Id() == 0 && curView_ != L"live" && curView_ != L"history") return;
+        if (!row) return;   // per-view branches below decide what (if anything) applies
         ctxRow_ = row;
 
         MenuFlyout menu;
@@ -726,6 +947,22 @@ namespace winrt::NeuralGuard::implementation
             add(L"Allow this destination", [this, id] { AddRuleFromEvent(id, false, false, 0); });
             add(L"Allow this destination for 1 hour", [this, id] { AddRuleFromEvent(id, false, false, 3600); });
             add(L"Allow this app (any port)", [this, id] { AddRuleFromEvent(id, false, true, 0); });
+        }
+        else if (curView_ == L"baseline")
+        {
+            hstring path = ctxRow_.C3();
+            int port = _wtoi(ctxRow_.C0().c_str());
+            if (path.empty() || port == 0) return;
+            if (ctxRow_.C2() == L"DEMOTED")
+                add(L"Re-trust this app", [this, path, port] { RetrustApp(path, port); RefreshCurrent(); });
+            else
+                add(L"Distrust (demote) this app", [this, path, port] { DemoteApp(path, port); RefreshCurrent(); });
+        }
+        else if (curView_ == L"flags")
+        {
+            int64_t id = ctxRow_.Id();
+            if (id == 0) return;
+            add(L"Remove this flag", [this, id] { RemoveFlag(id); RefreshCurrent(); });
         }
         if (menu.Items().Size() == 0) return;
 

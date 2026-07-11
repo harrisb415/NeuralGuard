@@ -278,8 +278,16 @@ rollout, data governance). Planned, not started — every item below is ⬜.
   until 4d), written directly like autonomy (no elevation). New **Flows** nav
   item shows completed `flow_features` with their anomaly + P(malicious) scores,
   sortable by clicking either score column. Verified on the VM: dashboard loads
-  the new UI, real scored flows appear. *Remaining for later: 4d's review items
-  and 4f's in-app digest plug into this surface as they land.*
+  the new UI, real scored flows appear.
+  **Full CLI parity added (2026-07-11):** the Active radio is enabled with a
+  warning; confidence-gate NumberBoxes (`ml_malicious/anomaly_threshold`) live in
+  the ML settings; new nav views **Flags** (`ml_flags` demotions/reviews, with
+  "Clear all" + right-click remove), **Baseline** (`ngd baseline` with right-click
+  Distrust / Re-trust an app = `features demote` / re-trust), **Feedback**
+  (`feedback_labels` with Export CSV = `feedback export`), and **Digest** (the
+  `ngd digest` summary rendered in-app). All Phase-4 CLI features are now reachable
+  from the GUI; actions write the DB directly (+bump `rules_gen`) like the rules
+  editor. Deployed + launched clean on the VM interactive session.
 
 **Real open risks, not hidden:** the public dataset is enterprise/lab traffic, not
 one person's home network — expect a real transfer gap and don't trust 4c's scores

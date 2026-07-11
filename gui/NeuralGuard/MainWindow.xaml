@@ -69,6 +69,18 @@
                 <muxc:NavigationViewItem Content="Flows" Tag="flows">
                     <muxc:NavigationViewItem.Icon><muxc:FontIcon Glyph="&#xE9D9;"/></muxc:NavigationViewItem.Icon>
                 </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="Flags" Tag="flags">
+                    <muxc:NavigationViewItem.Icon><muxc:FontIcon Glyph="&#xE7BA;"/></muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="Baseline" Tag="baseline">
+                    <muxc:NavigationViewItem.Icon><muxc:FontIcon Glyph="&#xE72E;"/></muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="Feedback" Tag="feedback">
+                    <muxc:NavigationViewItem.Icon><muxc:FontIcon Glyph="&#xE939;"/></muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="Digest" Tag="digest">
+                    <muxc:NavigationViewItem.Icon><muxc:FontIcon Glyph="&#xE7C3;"/></muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
             </muxc:NavigationView.MenuItems>
             <muxc:NavigationView.FooterMenuItems>
                 <muxc:NavigationViewItem Content="Settings" Tag="settings">
@@ -84,6 +96,14 @@
                                 VerticalAlignment="Center" Margin="0,0,12,0" Visibility="Collapsed">
                         <Button Content="Export" Click="OnExportRules"/>
                         <Button Content="Import" Click="OnImportRules"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" x:Name="FlagsTools" Orientation="Horizontal" Spacing="8"
+                                VerticalAlignment="Center" Margin="0,0,12,0" Visibility="Collapsed">
+                        <Button Content="Clear all flags" Click="OnClearFlags"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" x:Name="FeedbackTools" Orientation="Horizontal" Spacing="8"
+                                VerticalAlignment="Center" Margin="0,0,12,0" Visibility="Collapsed">
+                        <Button Content="Export CSV" Click="OnExportFeedback"/>
                     </StackPanel>
                     <AutoSuggestBox Grid.Column="2" x:Name="SearchBox" Width="260" VerticalAlignment="Center"
                                     PlaceholderText="Filter" QueryIcon="Find" TextChanged="OnSearchChanged"/>
@@ -180,6 +200,13 @@
                     </ListView.ItemTemplate>
                 </ListView>
 
+                <!-- Digest view: a plain-text weekly summary (Phase 4f). -->
+                <ScrollViewer Grid.Row="2" x:Name="DigestPanel" Visibility="Collapsed"
+                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="DigestText" FontFamily="Consolas" FontSize="13"
+                               IsTextSelectionEnabled="True" TextWrapping="NoWrap" Margin="4,8"/>
+                </ScrollViewer>
+
                 <!-- Settings form (shown instead of the data table for the Settings view). -->
                 <ScrollViewer Grid.Row="2" x:Name="SettingsPanel" Visibility="Collapsed"
                               VerticalScrollBarVisibility="Auto">
@@ -218,8 +245,19 @@
                                          Content="Shadow - score and log only, no effect on rules"/>
                             <RadioButton x:Name="Ml2" Tag="active" GroupName="mlmode" Checked="OnMlModeChanged"
                                          Content="Active - a strongly-malicious score can demote a trusted app so it prompts again"/>
-                            <TextBlock Text="Active never auto-blocks: a demoted app simply loses its automatic pass and asks you the next time it connects, exactly like a brand-new app. Only enable this once the models are trained on your own traffic - the shipped models are placeholders. Demotions show under Flows; clear them with `ngd features clear`."
+                            <TextBlock Text="Active never auto-blocks: a demoted app simply loses its automatic pass and asks you the next time it connects, exactly like a brand-new app. Only enable this once the models are trained on your own traffic - the shipped models are placeholders. Demotions show under the Flags view."
                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" FontSize="12" Margin="24,2,0,0"/>
+                            <TextBlock Text="Confidence gates (active mode)" Margin="0,10,0,0" FontWeight="SemiBold"/>
+                            <TextBlock Text="How strong a score must be before Active mode acts. Higher malicious / lower (more negative) anomaly = fewer, higher-confidence flags."
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" FontSize="12"/>
+                            <StackPanel Orientation="Horizontal" Spacing="20" Margin="0,4,0,0">
+                                <muxc:NumberBox x:Name="MalThresh" Header="Demote at P(malicious) &#x2265;" Width="220"
+                                                Minimum="0" Maximum="1" SmallChange="0.05" LargeChange="0.1"
+                                                SpinButtonPlacementMode="Compact" ValueChanged="OnMlThresholdChanged"/>
+                                <muxc:NumberBox x:Name="AnomThresh" Header="Review at anomaly &#x2264;" Width="220"
+                                                Minimum="-1" Maximum="1" SmallChange="0.05" LargeChange="0.1"
+                                                SpinButtonPlacementMode="Compact" ValueChanged="OnMlThresholdChanged"/>
+                            </StackPanel>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
