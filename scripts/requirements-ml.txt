@@ -12,3 +12,6 @@ numpy
 scikit-learn
 skl2onnx
 onnx
+# supervised scorer (train_supervised.py)
+lightgbm
+onnxmltools

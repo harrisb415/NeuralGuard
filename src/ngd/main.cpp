@@ -78,18 +78,19 @@ void MetaSet(ng::Db& db, const char* key, const char* val) {
 
 bool FeatureArchiveOn(ng::Db& db) { return MetaGet(db, "feature_archive", "0") == "1"; }
 
-// The anomaly model lives next to the policy DB, named anomaly.onnx.
-std::string ModelPathFor(const char* dbPath) {
+// The models live next to the policy DB: anomaly.onnx and supervised.onnx.
+std::string ModelPathFor(const char* dbPath, const char* name) {
     std::string p = dbPath ? dbPath : "";
     size_t s = p.find_last_of("\\/");
     std::string dir = (s == std::string::npos) ? "." : p.substr(0, s);
-    return dir + "\\anomaly.onnx";
+    return dir + "\\" + name;
 }
 
 // Configure shadow-mode scoring on `collector` for `dbPath` unless ml_mode=off.
 void MaybeEnableScoring(ng::FlowCollector& collector, ng::Db& db, const char* dbPath) {
     if (MetaGet(db, "ml_mode", "shadow") != "off")
-        collector.enableScoring(ModelPathFor(dbPath));
+        collector.enableScoring(ModelPathFor(dbPath, "anomaly.onnx"),
+                                ModelPathFor(dbPath, "supervised.onnx"));
 }
 
 void PrintUsage() {
@@ -484,13 +485,15 @@ int RunFeaturesDump(ng::Db& db) {
         if (sqlite3_step(c) == SQLITE_ROW) total = sqlite3_column_int64(c, 0);
         sqlite3_finalize(c);
     }
-    printf("flow_features: %lld row(s) archived\n\n", total);
-    printf("  %-8s  %-24s  %-22s  %7s  %10s  %10s  %7s\n",
-           "time", "app", "dest:port", "dur(ms)", "bytes_in", "bytes_out", "score");
+    printf("flow_features: %lld row(s) archived  (anom = anomaly score, lower=worse; "
+           "mal = P(malicious), higher=worse)\n\n", total);
+    printf("  %-8s  %-20s  %-20s  %6s  %9s  %9s  %6s  %5s\n",
+           "time", "app", "dest:port", "dur(ms)", "in", "out", "anom", "mal");
     sqlite3_stmt* s = nullptr;
     if (sqlite3_prepare_v2(h,
             "SELECT ts_utc, COALESCE(process_label,''), COALESCE(dest,''), remote_port,"
-            " duration_ms, bytes_in, bytes_out, anomaly_score FROM flow_features ORDER BY id DESC LIMIT 40;",
+            " duration_ms, bytes_in, bytes_out, anomaly_score, malicious_score"
+            " FROM flow_features ORDER BY id DESC LIMIT 40;",
             -1, &s, nullptr) != SQLITE_OK)
         return 1;
     while (sqlite3_step(s) == SQLITE_ROW) {
@@ -498,15 +501,17 @@ int RunFeaturesDump(ng::Db& db) {
         std::string tm  = ts.size() >= 19 ? ts.substr(11, 8) : ts;
         std::string app = (const char*)sqlite3_column_text(s, 1);
         std::string dst = (const char*)sqlite3_column_text(s, 2);
-        if (app.size() > 24) app = app.substr(0, 23) + ">";
+        if (app.size() > 20) app = app.substr(0, 19) + ">";
         std::string dp = dst + ":" + std::to_string(sqlite3_column_int(s, 3));
-        if (dp.size() > 22) dp = dp.substr(0, 21) + ">";
-        char score[12];
-        if (sqlite3_column_type(s, 7) == SQLITE_NULL) snprintf(score, sizeof score, "%7s", "-");
-        else snprintf(score, sizeof score, "%+7.3f", sqlite3_column_double(s, 7));
-        printf("  %-8s  %-24s  %-22s  %7d  %10lld  %10lld  %s\n",
+        if (dp.size() > 20) dp = dp.substr(0, 19) + ">";
+        char anom[10], mal[10];
+        if (sqlite3_column_type(s, 7) == SQLITE_NULL) snprintf(anom, sizeof anom, "%6s", "-");
+        else snprintf(anom, sizeof anom, "%+6.2f", sqlite3_column_double(s, 7));
+        if (sqlite3_column_type(s, 8) == SQLITE_NULL) snprintf(mal, sizeof mal, "%5s", "-");
+        else snprintf(mal, sizeof mal, "%5.2f", sqlite3_column_double(s, 8));
+        printf("  %-8s  %-20s  %-20s  %6d  %9lld  %9lld  %6s  %5s\n",
                tm.c_str(), app.c_str(), dp.c_str(), sqlite3_column_int(s, 4),
-               (long long)sqlite3_column_int64(s, 5), (long long)sqlite3_column_int64(s, 6), score);
+               (long long)sqlite3_column_int64(s, 5), (long long)sqlite3_column_int64(s, 6), anom, mal);
     }
     sqlite3_finalize(s);
     return 0;

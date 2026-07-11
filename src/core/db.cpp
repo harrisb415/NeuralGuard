@@ -81,7 +81,8 @@ const char* kSchema =
     "  bytes_in      INTEGER,"
     "  bytes_out     INTEGER,"
     "  local_port    INTEGER,"
-    "  anomaly_score REAL);"           // Phase 4b: shadow-mode ML score, NULL if unscored
+    "  anomaly_score REAL,"            // Phase 4b: shadow anomaly score, NULL if unscored
+    "  malicious_score REAL);"         // Phase 4c: shadow supervised P(malicious), NULL if unscored
     // Feature archival is off by default (privacy: it records who you talked to
     // and how much). `ngd features` collecting is itself the opt-in; this flag
     // gates future collection folded into the enforce/record daemon.
@@ -110,6 +111,8 @@ bool Db::open(const char* path) {
     sqlite3_exec(db_, "ALTER TABLE flow_events ADD COLUMN remote_domain TEXT;",
                  nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "ALTER TABLE flow_features ADD COLUMN anomaly_score REAL;",
+                 nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE flow_features ADD COLUMN malicious_score REAL;",
                  nullptr, nullptr, nullptr);
     return true;
 }

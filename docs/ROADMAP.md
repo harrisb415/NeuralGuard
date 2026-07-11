@@ -216,10 +216,21 @@ rollout, data governance). Planned, not started — every item below is ⬜.
   (signed HTTPS download +0.04 = normal, small short flows −0.18), *and* clean
   graceful degradation with the DLL removed (no crash, no stray system-DLL
   version-mismatch). Ships in the installer.
-- ⬜ **4c. Supervised classifier (public dataset).** Map CICIDS2017 or CTU-13's
-  feature schema onto the subset we can actually compute ourselves (drop anything
-  needing payload access). Off-device LightGBM → ONNX. Scored alongside the
-  anomaly model, still shadow mode.
+- ✅ **4c. Supervised classifier (public dataset).** DONE. `scripts/train_supervised.py`
+  maps a CIC-FlowMeter / CICIDS2017 CSV onto the **6 features we share with a
+  wire-captured dataset** (log duration, log bytes in/out, out-ratio, is-https,
+  is-http — *not* is-signed/hour, which a network IDS dataset lacks: the
+  distribution/feature-mismatch reality called out in DESIGN.md §6). Trains
+  LightGBM → ONNX (P(malicious) output) with a feature-spec JSON. On-device: the
+  scorer was generalized (`AnomalyScorer` → generic `OnnxModel`, feature-vector
+  building moved into the collector), so `ngd` runs **both** models per completed
+  flow — anomaly (8 feats → `anomaly_score`) and supervised (6 feats →
+  `malicious_score`), both shadow-mode, both optional. `ngd features dump` shows
+  both. Verified: trainer discriminates synthetic IDS data (benign P=0.0,
+  malicious P=1.0); on the VM both models load and score a real flow (signed
+  HTTPS download → anom +0.03, mal 0.00). **Still a placeholder until trained on
+  real data** — the public dataset is enterprise/lab traffic, so trust it only
+  after shadow mode proves it on your own flows.
 - ⬜ **4d. Confidence gate + promotion/demotion wiring.** `meta('ml_mode')`
   shadow→active switch (defaults to shadow, even across upgrades). High
   supervised-malicious confidence on a trusted habit → proposed demotion via the

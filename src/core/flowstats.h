@@ -38,17 +38,20 @@ public:
     void stop();
     unsigned long long written() const { return written_.load(); }
 
-    // Enable shadow-mode anomaly scoring: each completed flow is scored with the
-    // ONNX model at `onnxPath` and the score stored. A no-op (scoring disabled)
-    // if the model or onnxruntime.dll is missing. Call before run().
-    void enableScoring(const std::string& onnxPath) { modelPath_ = onnxPath; }
+    // Enable shadow-mode scoring: each completed flow is scored with the anomaly
+    // model and/or the supervised classifier, and the scores stored. A no-op for
+    // whichever model (or onnxruntime.dll) is missing. Call before run().
+    void enableScoring(const std::string& anomalyPath, const std::string& supervisedPath) {
+        anomalyPath_ = anomalyPath;
+        supervisedPath_ = supervisedPath;
+    }
 
 private:
     Db& db_;
     IdentityResolver& id_;
     DnsWatcher* dns_ = nullptr;
-    std::string modelPath_;
-    AnomalyScorer scorer_;
+    std::string anomalyPath_, supervisedPath_;
+    OnnxModel anomaly_, supervised_;
     void* stopEvent_ = nullptr;
     std::atomic<unsigned long long> written_{ 0 };
 };

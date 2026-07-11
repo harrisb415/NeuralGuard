@@ -55,17 +55,17 @@ bool FileExists(const std::string& p) {
 
 }  // namespace
 
-struct AnomalyScorer::Impl {
+struct OnnxModel::Impl {
     std::unique_ptr<Ort::Env> env;
     std::unique_ptr<Ort::Session> session;
     std::string inputName;
-    std::string scoreOutput;   // the float 'scores' output (decision_function)
+    std::string scoreOutput;   // the first float output (score / probabilities)
 };
 
-AnomalyScorer::AnomalyScorer() : p_(std::make_unique<Impl>()) {}
-AnomalyScorer::~AnomalyScorer() = default;
+OnnxModel::OnnxModel() : p_(std::make_unique<Impl>()) {}
+OnnxModel::~OnnxModel() = default;
 
-bool AnomalyScorer::load(const std::string& onnxPath) {
+bool OnnxModel::load(const std::string& onnxPath) {
     p_->session.reset();
     if (!FileExists(onnxPath)) return false;
     if (!EnsureOrt()) return false;
@@ -79,8 +79,9 @@ bool AnomalyScorer::load(const std::string& onnxPath) {
         Ort::AllocatorWithDefaultOptions alloc;
         p_->inputName = p_->session->GetInputNameAllocated(0, alloc).get();
 
-        // skl2onnx IsolationForest emits label(int64) + scores(float); take the
-        // first float output as the anomaly score.
+        // Take the first float output: 'scores' for the anomaly model,
+        // 'probabilities' for the classifier (its int64 'label' is skipped, so
+        // we don't ask ORT to compute it).
         p_->scoreOutput.clear();
         size_t nout = p_->session->GetOutputCount();
         for (size_t i = 0; i < nout; ++i) {
@@ -94,38 +95,29 @@ bool AnomalyScorer::load(const std::string& onnxPath) {
         if (p_->scoreOutput.empty()) { p_->session.reset(); return false; }
         return true;
     } catch (const std::exception& e) {
-        fprintf(stderr, "anomaly model load failed: %s\n", e.what());
+        fprintf(stderr, "model load failed (%s): %s\n", onnxPath.c_str(), e.what());
         p_->session.reset();
         return false;
     }
 }
 
-bool AnomalyScorer::loaded() const { return p_ && p_->session != nullptr; }
+bool OnnxModel::loaded() const { return p_ && p_->session != nullptr; }
 
-float AnomalyScorer::score(const FlowFeatureInput& in) {
-    if (!loaded()) return 0.0f;
-    const long long total = in.bytesIn + in.bytesOut;
-    float feats[8] = {
-        std::log1p(static_cast<float>(in.durationMs)),
-        std::log1p(static_cast<float>(in.bytesIn)),
-        std::log1p(static_cast<float>(in.bytesOut)),
-        static_cast<float>(static_cast<double>(in.bytesOut) / static_cast<double>(total + 1)),
-        in.remotePort == 443 ? 1.0f : 0.0f,
-        in.remotePort == 80 ? 1.0f : 0.0f,
-        in.isSigned ? 1.0f : 0.0f,
-        static_cast<float>(in.hour),
-    };
+std::vector<float> OnnxModel::run(const std::vector<float>& feats) {
+    if (!loaded() || feats.empty()) return {};
     try {
         Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-        int64_t shape[2] = { 1, 8 };
-        Ort::Value input = Ort::Value::CreateTensor<float>(mem, feats, 8, shape, 2);
+        int64_t shape[2] = { 1, static_cast<int64_t>(feats.size()) };
+        Ort::Value input = Ort::Value::CreateTensor<float>(
+            mem, const_cast<float*>(feats.data()), feats.size(), shape, 2);
         const char* inNames[1]  = { p_->inputName.c_str() };
         const char* outNames[1] = { p_->scoreOutput.c_str() };
         auto out = p_->session->Run(Ort::RunOptions{ nullptr }, inNames, &input, 1, outNames, 1);
-        const float* s = out[0].GetTensorData<float>();
-        return s[0];
+        size_t n = out[0].GetTensorTypeAndShapeInfo().GetElementCount();
+        const float* d = out[0].GetTensorData<float>();
+        return std::vector<float>(d, d + n);
     } catch (const std::exception&) {
-        return 0.0f;
+        return {};
     }
 }
 
