@@ -120,7 +120,7 @@ void PrintUsage() {
         "  ngd features mode [val] [db]  Show/set ML scoring: shadow (default) | active | off.\n"
         "  ngd features dump [db]        Show recent archived feature rows + scores.\n"
         "  ngd features flags [db]       Show active-mode demotions / review items.\n"
-        "  ngd features demote <app> <port> [db]  Manually distrust an (app,port) so it prompts.\n"
+        "  ngd features demote <app> <port> [proto] [db]  Distrust an (app,port) so it prompts (proto=6 TCP).\n"
         "  ngd features clear [db]       Clear ML flags (re-trust demoted apps).\n"
         "  ngd features purge [db] [days] Delete feature rows older than [days] (default 30).\n"
         "  ngd -h | --help | /?          Show this help.\n\n"
@@ -694,29 +694,40 @@ int RunFeatures(int argc, char** argv) {
     // like an ML demotion. The inverse of adding a permit rule; undo with `clear`.
     if (sub && strcmp(sub, "demote") == 0) {
         if (argc < 5) {
-            fprintf(stderr, "usage: ngd features demote <app_path> <port> [db]\n");
+            fprintf(stderr, "usage: ngd features demote <app_path> <port> [proto] [db]\n"
+                            "  proto defaults to 6 (TCP); use 17 for UDP. Must match the\n"
+                            "  baseline row's protocol or the demote won't take effect.\n");
             return 1;
         }
         const char* app  = argv[3];
         int         port = atoi(argv[4]);
-        const char* dbp  = (argc >= 6) ? argv[5] : "ngpolicy.db";
+        // Optional [proto]: a bare 1..255 integer. Anything with a path separator
+        // or dot is the db path, so proto stays the TCP default.
+        int   proto = 6;
+        int   ai    = 5;
+        if (argc > ai) {
+            int m = atoi(argv[ai]);
+            if (m >= 1 && m <= 255 && !strpbrk(argv[ai], "\\/.")) { proto = m; ++ai; }
+        }
+        const char* dbp = (argc > ai) ? argv[ai] : "ngpolicy.db";
         ng::Db db;
         if (!db.open(dbp)) return 1;
         sqlite3_stmt* s = nullptr;
         sqlite3_prepare_v2(db.handle(),
             "INSERT OR IGNORE INTO ml_flags"
             "(ts_utc,kind,process_key,process_label,app_path,dest,remote_port,protocol,score)"
-            " VALUES(?,'demote','','(manual)',?,'(manual)',?,6,1.0);", -1, &s, nullptr);
+            " VALUES(?,'demote','','(manual)',?,'(manual)',?,?,1.0);", -1, &s, nullptr);
         sqlite3_bind_text(s, 1, ng::util::IsoNow().c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(s, 2, app, -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(s, 3, port);
+        sqlite3_bind_int(s, 4, proto);
         int rc = sqlite3_step(s);
         sqlite3_finalize(s);
         if (rc != SQLITE_DONE) { fprintf(stderr, "demote failed: %s\n", sqlite3_errmsg(db.handle())); return 1; }
         sqlite3_exec(db.handle(), "UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='rules_gen';",
                      nullptr, nullptr, nullptr);
-        printf("demoted %s:%d - it will prompt on its next connection (undo with `ngd features clear`).\n",
-               app, port);
+        printf("demoted %s:%d/%d - it will prompt on its next connection (undo with `ngd features clear`).\n",
+               app, port, proto);
         return 0;
     }
 

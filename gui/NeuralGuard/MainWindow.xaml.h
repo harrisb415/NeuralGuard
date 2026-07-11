@@ -42,8 +42,8 @@ namespace winrt::NeuralGuard::implementation
         void OnExportFeedback(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
 
     private:
-        void DemoteApp(winrt::hstring const& appPath, int port);   // Phase 4d: manual distrust
-        void RetrustApp(winrt::hstring const& appPath, int port);  // remove a demote flag
+        void DemoteApp(winrt::hstring const& appPath, int port, int proto);   // Phase 4d: manual distrust
+        void RetrustApp(winrt::hstring const& appPath, int port, int proto);  // remove a demote flag
         void RemoveFlag(int64_t id);                               // delete one ml_flags row
         void ClearMlFlags();                                       // delete all ml_flags
         void BuildDigest();                                        // Phase 4f: fill DigestText

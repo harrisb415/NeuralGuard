@@ -343,20 +343,25 @@ namespace winrt::NeuralGuard::implementation
         {
             // Phase 4d: the stable (app, port) permits enforce would install, with
             // each one's demote state. Right-click to distrust / re-trust an app.
-            SetHeaders(L"Port", L"Conns", L"State", L"Application", L"");
+            SetHeaders(L"Port", L"Conns", L"State", L"Application", L"Proto");
             if (ok) d.each(
                 "SELECT fe.remote_port, COUNT(DISTINCT fe.local_port||'|'||fe.remote_addr) AS conns,"
                 " EXISTS(SELECT 1 FROM ml_flags m WHERE m.kind='demote' AND m.app_path=pi.image_path"
-                "   AND m.remote_port=fe.remote_port AND m.protocol=fe.protocol) AS demoted, pi.image_path"
+                "   AND m.remote_port=fe.remote_port AND m.protocol=fe.protocol) AS demoted,"
+                " pi.image_path, fe.protocol"
                 " FROM flow_events fe JOIN process_identity pi ON fe.image_id=pi.id"
                 " WHERE fe.remote_port>0 AND fe.remote_port<49152 AND pi.image_path LIKE '_:\\%'"
                 "   AND fe.verdict IN ('ALLOW','CAPALLOW')"
                 " GROUP BY pi.image_path, fe.protocol, fe.remote_port HAVING conns>=3"
                 " ORDER BY demoted DESC, conns DESC LIMIT 500;", [&](sqlite3_stmt* s) {
                 bool demoted = sqlite3_column_int(s, 2) != 0;
-                rows.push_back({ 0, { to_hstring(sqlite3_column_int(s, 0)), to_hstring(sqlite3_column_int(s, 1)),
-                                      demoted ? hstring(L"DEMOTED") : hstring(L"permitted"),
-                                      U8(ng::Db::ColText(s, 3)), L"" } });
+                int proto = sqlite3_column_int(s, 4);
+                hstring pname = proto == 6 ? L"TCP" : proto == 17 ? L"UDP" : to_hstring(proto);
+                // Stash the protocol in the row Id so a demote targets the exact
+                // (app, port, proto) - the same key the enforce baseline groups by.
+                rows.push_back({ proto, { to_hstring(sqlite3_column_int(s, 0)), to_hstring(sqlite3_column_int(s, 1)),
+                                          demoted ? hstring(L"DEMOTED") : hstring(L"permitted"),
+                                          U8(ng::Db::ColText(s, 3)), pname } });
             });
         }
         // (the Settings and Digest views use their own panels, not the data table)
@@ -716,7 +721,7 @@ namespace winrt::NeuralGuard::implementation
 
     // Direct-DB helpers (same pattern as the rules editor: write + bump rules_gen
     // so a running enforce daemon re-applies the baseline live).
-    void MainWindow::DemoteApp(hstring const& appPath, int port)
+    void MainWindow::DemoteApp(hstring const& appPath, int port, int proto)
     {
         ng::Db d;
         if (!d.open(DbPathU8().c_str())) return;
@@ -724,25 +729,28 @@ namespace winrt::NeuralGuard::implementation
         sqlite3_prepare_v2(d.handle(),
             "INSERT OR IGNORE INTO ml_flags(ts_utc,kind,process_key,process_label,app_path,dest,"
             "remote_port,protocol,score) VALUES(strftime('%Y-%m-%dT%H:%M:%SZ','now'),'demote','',"
-            "'(manual)',?,'(manual)',?,6,1.0);", -1, &s, nullptr);
+            "'(manual)',?,'(manual)',?,?,1.0);", -1, &s, nullptr);
         std::string p = to_string(appPath);
         sqlite3_bind_text(s, 1, p.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(s, 2, port);
+        sqlite3_bind_int(s, 3, proto);
         sqlite3_step(s); sqlite3_finalize(s);
         sqlite3_exec(d.handle(), "UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='rules_gen';", nullptr, nullptr, nullptr);
         Notify(L"Demoted - it will prompt on its next connection.", InfoBarSeverity::Success);
     }
 
-    void MainWindow::RetrustApp(hstring const& appPath, int port)
+    void MainWindow::RetrustApp(hstring const& appPath, int port, int proto)
     {
         ng::Db d;
         if (!d.open(DbPathU8().c_str())) return;
         sqlite3_stmt* s = nullptr;
         sqlite3_prepare_v2(d.handle(),
-            "DELETE FROM ml_flags WHERE kind='demote' AND app_path=? AND remote_port=?;", -1, &s, nullptr);
+            "DELETE FROM ml_flags WHERE kind='demote' AND app_path=? AND remote_port=? AND protocol=?;",
+            -1, &s, nullptr);
         std::string p = to_string(appPath);
         sqlite3_bind_text(s, 1, p.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(s, 2, port);
+        sqlite3_bind_int(s, 3, proto);
         sqlite3_step(s); sqlite3_finalize(s);
         sqlite3_exec(d.handle(), "UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='rules_gen';", nullptr, nullptr, nullptr);
         Notify(L"Re-trusted - it auto-permits again next time enforcement runs.", InfoBarSeverity::Success);
@@ -952,11 +960,12 @@ namespace winrt::NeuralGuard::implementation
         {
             hstring path = ctxRow_.C3();
             int port = _wtoi(ctxRow_.C0().c_str());
+            int proto = (int)ctxRow_.Id();   // stashed protocol (6=TCP, 17=UDP)
             if (path.empty() || port == 0) return;
             if (ctxRow_.C2() == L"DEMOTED")
-                add(L"Re-trust this app", [this, path, port] { RetrustApp(path, port); RefreshCurrent(); });
+                add(L"Re-trust this app", [this, path, port, proto] { RetrustApp(path, port, proto); RefreshCurrent(); });
             else
-                add(L"Distrust (demote) this app", [this, path, port] { DemoteApp(path, port); RefreshCurrent(); });
+                add(L"Distrust (demote) this app", [this, path, port, proto] { DemoteApp(path, port, proto); RefreshCurrent(); });
         }
         else if (curView_ == L"flags")
         {
