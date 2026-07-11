@@ -35,10 +35,10 @@
               ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
             <TextBlock Grid.Column="0" Text="NeuralGuard" FontSize="20" FontWeight="SemiBold"
                        VerticalAlignment="Center" Margin="0,0,16,0"/>
-            <Button Grid.Column="1" Content="Enforce" Click="OnEnforce" Style="{StaticResource AccentButtonStyle}"/>
-            <Button Grid.Column="2" Content="Learn" Click="OnLearn"/>
-            <Button Grid.Column="3" Content="Stop" Click="OnStop"/>
-            <Button Grid.Column="4" Content="Panic" Click="OnPanic" HorizontalAlignment="Left"/>
+            <Button Grid.Column="1" Content="Enforce" Click="OnEnforce" Style="{StaticResource NG.Button.Primary}"/>
+            <Button Grid.Column="2" Content="Learn" Click="OnLearn" Style="{StaticResource NG.Button.Ghost}"/>
+            <Button Grid.Column="3" Content="Stop" Click="OnStop" Style="{StaticResource NG.Button.Ghost}"/>
+            <Button Grid.Column="4" Content="Panic" Click="OnPanic" HorizontalAlignment="Left" Style="{StaticResource NG.Button.Danger}"/>
             <muxc:InfoBadge Grid.Column="5" x:Name="ModeBadge" Style="{StaticResource InformationalDotInfoBadgeStyle}"
                             VerticalAlignment="Center" Margin="0,0,6,0"/>
             <TextBlock Grid.Column="6" x:Name="ModeText" Text="idle" VerticalAlignment="Center"
@@ -190,9 +190,12 @@
                                     <ColumnDefinition Width="320"/>
                                     <ColumnDefinition Width="90"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="{x:Bind C0}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
-                                <TextBlock Grid.Column="1" Text="{x:Bind C1}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
-                                <TextBlock Grid.Column="2" Text="{x:Bind C2}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                                <TextBlock Grid.Column="0" Text="{x:Bind C0}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"
+                                           Foreground="{Binding C0, Converter={StaticResource SemBrush}}"/>
+                                <TextBlock Grid.Column="1" Text="{x:Bind C1}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"
+                                           Foreground="{Binding C1, Converter={StaticResource SemBrush}}"/>
+                                <TextBlock Grid.Column="2" Text="{x:Bind C2}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"
+                                           Foreground="{Binding C2, Converter={StaticResource SemBrush}}"/>
                                 <TextBlock Grid.Column="3" Text="{x:Bind C3}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
                                 <TextBlock Grid.Column="4" Text="{x:Bind C4}" TextTrimming="CharacterEllipsis"/>
                             </Grid>

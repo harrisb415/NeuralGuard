@@ -135,6 +135,8 @@
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
     <Page Include="MainWindow.xaml" />
+    <Page Include="Themes\NeuralGuardColors.xaml" />
+    <Page Include="Themes\NeuralGuardStyles.xaml" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="pch.cpp">
@@ -160,10 +162,14 @@
     <ClInclude Include="Row.h" />
     <ClInclude Include="ColWidths.h" />
     <ClInclude Include="ColumnGrip.h" />
+    <ClInclude Include="SemBrush.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Row.cpp">
       <DependentUpon>Row.idl</DependentUpon>
+    </ClCompile>
+    <ClCompile Include="SemBrush.cpp">
+      <DependentUpon>SemBrush.idl</DependentUpon>
     </ClCompile>
     <ClCompile Include="ColWidths.cpp">
       <DependentUpon>ColWidths.idl</DependentUpon>
@@ -184,6 +190,9 @@
       <SubType>Code</SubType>
     </Midl>
     <Midl Include="ColumnGrip.idl">
+      <SubType>Code</SubType>
+    </Midl>
+    <Midl Include="SemBrush.idl">
       <SubType>Code</SubType>
     </Midl>
   </ItemGroup>

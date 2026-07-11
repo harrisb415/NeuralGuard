@@ -1,0 +1,12 @@
+namespace NeuralGuard
+{
+    // Maps a table cell's text to a neon semantic brush (verdict / state / label /
+    // kind tokens -> green / red / cyan / amber), else the default text brush.
+    // Bound as {x:Bind Cn, Converter=...} on the token-bearing columns; numeric
+    // and free-text cells fall through to the default, so it's safe app-wide.
+    [default_interface]
+    runtimeclass SemBrush : Microsoft.UI.Xaml.Data.IValueConverter
+    {
+        SemBrush();
+    }
+}

@@ -33,3 +33,7 @@
 
 #include <string>
 #include <vector>
+
+// XAML-activated local type (used as {StaticResource SemBrush}); XamlTypeInfo
+// needs the full implementation type, same as ColumnGrip.
+#include "SemBrush.h"

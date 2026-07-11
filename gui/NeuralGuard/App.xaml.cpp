@@ -47,6 +47,14 @@ namespace winrt::NeuralGuard::implementation
             Resources().Insert(box_value(L"ColW"), winrt::make<NeuralGuard::implementation::ColWidths>());
             window = make<MainWindow>();
             Mark("MainWindow made");
+            // Mica backdrop (dark, per the app RequestedTheme). Guarded on its own:
+            // an unsupported/failed backdrop must not skip Activate().
+            try
+            {
+                window.SystemBackdrop(Microsoft::UI::Xaml::Media::MicaBackdrop{});
+                Mark("Mica set");
+            }
+            catch (...) { Mark("Mica unavailable"); }
             window.Activate();
             Mark("Activated");
         }
