@@ -34,6 +34,8 @@ namespace winrt::NeuralGuard::implementation
                              winrt::Microsoft::UI::Xaml::Controls::AutoSuggestBoxTextChangedEventArgs const&);
         void OnExportRules(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnImportRules(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnFeatureToggle(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnMlModeChanged(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
 
     private:
         HWND WindowHandle();
@@ -41,6 +43,8 @@ namespace winrt::NeuralGuard::implementation
         void RefreshServiceStatus();
         int  ReadAutonomy();
         void WriteAutonomy(int level);
+        std::string MetaGet(const char* key, const char* dflt);
+        void MetaSet(const char* key, const char* val);
         void AddRuleFromEvent(int64_t eventId, bool block, bool useApp, int ttlSeconds);
         void DelRule(int64_t ruleId);
         void ApplyHeaderText();

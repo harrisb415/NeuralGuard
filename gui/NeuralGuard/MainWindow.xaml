@@ -66,6 +66,9 @@
                 <muxc:NavigationViewItem Content="History" Tag="history">
                     <muxc:NavigationViewItem.Icon><muxc:FontIcon Glyph="&#xE81C;"/></muxc:NavigationViewItem.Icon>
                 </muxc:NavigationViewItem>
+                <muxc:NavigationViewItem Content="Flows" Tag="flows">
+                    <muxc:NavigationViewItem.Icon><muxc:FontIcon Glyph="&#xE9D9;"/></muxc:NavigationViewItem.Icon>
+                </muxc:NavigationViewItem>
             </muxc:NavigationView.MenuItems>
             <muxc:NavigationView.FooterMenuItems>
                 <muxc:NavigationViewItem Content="Settings" Tag="settings">
@@ -201,6 +204,20 @@
                                 <Button Content="Install service" Click="OnServiceInstall" Style="{StaticResource AccentButtonStyle}"/>
                                 <Button Content="Remove service" Click="OnServiceRemove"/>
                             </StackPanel>
+                        </StackPanel>
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Machine learning" FontSize="18" FontWeight="SemiBold"/>
+                            <TextBlock Text="Learn a baseline from your completed connections and score new ones for anomalies. Scoring is advisory in Shadow mode - it is logged (see the Flows view) and never blocks anything."
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+                            <ToggleSwitch x:Name="FeatureToggle" Header="Collect flow features"
+                                          OnContent="On" OffContent="Off" Toggled="OnFeatureToggle"/>
+                            <TextBlock Text="Scoring mode" Margin="0,8,0,0" FontWeight="SemiBold"/>
+                            <RadioButton x:Name="Ml0" Tag="off" GroupName="mlmode" Checked="OnMlModeChanged"
+                                         Content="Off - don't score"/>
+                            <RadioButton x:Name="Ml1" Tag="shadow" GroupName="mlmode" Checked="OnMlModeChanged"
+                                         Content="Shadow - score and log only, no effect on rules"/>
+                            <RadioButton x:Name="Ml2" Tag="active" GroupName="mlmode" Checked="OnMlModeChanged"
+                                         IsEnabled="False" Content="Active - let scores propose changes (coming soon)"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>

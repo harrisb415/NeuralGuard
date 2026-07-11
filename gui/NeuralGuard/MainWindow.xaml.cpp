@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <ctime>
 #include <string_view>
@@ -293,6 +294,23 @@ namespace winrt::NeuralGuard::implementation
                                    U8(info), U8(ng::Db::ColText(s, 2)), L"" } });
             });
         }
+        else if (curView_ == L"flows")
+        {
+            // Phase 4: completed flows with their shadow-mode ML scores. Sortable
+            // by clicking Anomaly (lower = more anomalous) or P(malicious).
+            SetHeaders(L"Time", L"Application", L"Destination", L"Anomaly", L"P(malicious)");
+            if (ok) d.each("SELECT ts_utc, COALESCE(process_label,''), COALESCE(dest,''), remote_port,"
+                           " anomaly_score, malicious_score FROM flow_features ORDER BY id DESC LIMIT 300;",
+                           [&](sqlite3_stmt* s) {
+                std::string ts = ng::Db::ColText(s, 0);
+                std::string tm = ts.size() >= 19 ? ts.substr(11, 8) : ts;
+                std::string dest = ng::Db::ColText(s, 2) + ":" + std::to_string(sqlite3_column_int(s, 3));
+                char anom[24] = "-", mal[24] = "-";
+                if (sqlite3_column_type(s, 4) != SQLITE_NULL) snprintf(anom, sizeof anom, "%+.3f", sqlite3_column_double(s, 4));
+                if (sqlite3_column_type(s, 5) != SQLITE_NULL) snprintf(mal, sizeof mal, "%.2f", sqlite3_column_double(s, 5));
+                rows.push_back({ 0, { U8(tm), U8(ng::Db::ColText(s, 1)), U8(dest), U8(anom), U8(mal) } });
+            });
+        }
         // (the Settings view uses a form panel, not the data table)
 
         if (!filter_.empty())
@@ -366,6 +384,7 @@ namespace winrt::NeuralGuard::implementation
         else if (tag == L"habits") title = L"Habits";
         else if (tag == L"apps") title = L"Per-app";
         else if (tag == L"history") title = L"History";
+        else if (tag == L"flows") title = L"Flows";
         else if (tag == L"settings") title = L"Settings";
         ViewTitle().Text(title);
 
@@ -491,11 +510,16 @@ namespace winrt::NeuralGuard::implementation
 
     void MainWindow::LoadSettings()
     {
-        loadingSettings_ = true;   // syncing the radios must not write back / toast
+        loadingSettings_ = true;   // syncing the controls must not write back / toast
         int a = ReadAutonomy();
         Auto0().IsChecked(a == 0);
         Auto1().IsChecked(a == 1);
         Auto2().IsChecked(a == 2);
+        FeatureToggle().IsOn(MetaGet("feature_archive", "0") == "1");
+        std::string mode = MetaGet("ml_mode", "shadow");
+        Ml0().IsChecked(mode == "off");
+        Ml1().IsChecked(mode == "shadow");
+        Ml2().IsChecked(mode == "active");
         loadingSettings_ = false;
         RefreshServiceStatus();
     }
@@ -533,6 +557,47 @@ namespace winrt::NeuralGuard::implementation
                     : level == 1 ? L"Autonomy: auto-allow apps you already use."
                                  : L"Autonomy: auto-allow everything (log only).";
         Notify(msg, InfoBarSeverity::Success);
+    }
+
+    // key is always a hardcoded constant here (no user input -> no injection risk).
+    std::string MainWindow::MetaGet(const char* key, const char* dflt)
+    {
+        ng::Db d;
+        if (d.open(DbPathU8().c_str()))
+        {
+            std::string v = d.scalar((std::string("SELECT v FROM meta WHERE k='") + key + "';").c_str());
+            if (!v.empty()) return v;
+        }
+        return dflt;
+    }
+    void MainWindow::MetaSet(const char* key, const char* val)
+    {
+        ng::Db d;
+        if (!d.open(DbPathU8().c_str())) return;
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(d.handle(),
+            "INSERT INTO meta(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v;",
+            -1, &s, nullptr);
+        sqlite3_bind_text(s, 1, key, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(s, 2, val, -1, SQLITE_TRANSIENT);
+        sqlite3_step(s); sqlite3_finalize(s);
+    }
+
+    void MainWindow::OnFeatureToggle(IInspectable const&, RoutedEventArgs const&)
+    {
+        if (loadingSettings_) return;
+        bool on = FeatureToggle().IsOn();
+        MetaSet("feature_archive", on ? "1" : "0");
+        Notify(on ? L"Flow feature collection ON — applies next time enforcement or learning runs."
+                  : L"Flow feature collection OFF.", InfoBarSeverity::Success);
+    }
+    void MainWindow::OnMlModeChanged(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        if (loadingSettings_) return;
+        auto fe = sender.try_as<FrameworkElement>();
+        std::string mode = fe ? to_string(unbox_value_or<hstring>(fe.Tag(), L"shadow")) : "shadow";
+        MetaSet("ml_mode", mode.c_str());
+        Notify(L"ML scoring mode: " + to_hstring(mode) + L".", InfoBarSeverity::Success);
     }
 
     void MainWindow::RefreshServiceStatus()

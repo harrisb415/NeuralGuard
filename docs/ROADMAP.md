@@ -246,6 +246,17 @@ rollout, data governance). Planned, not started — every item below is ⬜.
 - ⬜ **4f. Weekly digest + optional LLM narration.** Surfaces anomaly/supervised
   flags in the still-open Phase-3 weekly digest delivery item. An offline LLM may
   turn it into prose — advisory only, it never enforces.
+- ✅ **4g. Dashboard surface (the WinUI GUI catches up to Phase 4).** DONE, first
+  cut. Until now every Phase-4 feature was CLI-only (`ngd features …`), invisible
+  in the dashboard — and DESIGN.md always intended scores to be *watched* in the
+  GUI, so this closed a real gap. Settings tab gained a **Machine learning**
+  section: a "Collect flow features" toggle (`meta('feature_archive')`) and a
+  scoring-mode choice Off / Shadow / Active (`meta('ml_mode')`, Active disabled
+  until 4d), written directly like autonomy (no elevation). New **Flows** nav
+  item shows completed `flow_features` with their anomaly + P(malicious) scores,
+  sortable by clicking either score column. Verified on the VM: dashboard loads
+  the new UI, real scored flows appear. *Remaining for later: 4d's review items
+  and 4f's in-app digest plug into this surface as they land.*
 
 **Real open risks, not hidden:** the public dataset is enterprise/lab traffic, not
 one person's home network — expect a real transfer gap and don't trust 4c's scores
