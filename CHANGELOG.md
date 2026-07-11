@@ -5,6 +5,47 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-07-11
+
+### Added
+
+- **Machine-learning tier (Phase 4)** — NeuralGuard now learns a statistical
+  picture of your normal traffic and scores completed connections in the
+  background, off the enforcement path. Two complementary models run on-device
+  via ONNX Runtime: an **Isolation Forest** anomaly model ("unlike your own
+  normal") and a **LightGBM** supervised classifier ("known-bad patterns").
+  The runtime is loaded dynamically by full path, so a missing runtime or model
+  degrades gracefully — the firewall runs exactly as before.
+- **Shadow mode by default** — scores are logged and shown, never acting on a
+  rule. An opt-in **Active** mode lets a strongly-malicious score *demote* a
+  trusted app so it prompts again on its next connection; it only ever removes
+  an automatic pass and **never auto-blocks**. Anomaly scores alone are advisory
+  review flags, never a demotion. Confidence gates are tunable.
+- **Feedback loop** — every prompt verdict (and each autonomy auto-allow)
+  becomes a labeled training example; `ngd feedback export` writes a CSV that
+  `scripts/train_supervised.py --feedback` folds into the next offline run.
+- **Weekly digest** — `ngd digest` now surfaces the ML flags, the most
+  suspicious and most anomalous flows, and a feedback summary. An optional,
+  offline-first `scripts/narrate_digest.py` can turn it into prose (advisory
+  only).
+- **Off-device training** — `scripts/train_anomaly.py` and
+  `scripts/train_supervised.py` build the two models from your own data (and a
+  public IDS dataset) and export them to ONNX.
+- **Dashboard catches up to Phase 4** — new **Flows**, **Flags**, **Baseline**,
+  **Feedback**, and **Digest** views; a **Machine learning** settings section
+  (collect toggle, scoring mode, confidence gates); and right-click
+  **Distrust / Re-trust** on the Baseline view. Every Phase-4 CLI feature is now
+  reachable from the GUI.
+
+### Notes
+
+- **The pipeline ships without pretrained models — by design.** The installer
+  includes the ONNX runtime but no models, so scoring is inert (and harmless)
+  until you train your own on your traffic and drop `anomaly.onnx` /
+  `supervised.onnx` next to `ngd.exe`. The models are the detector; the shipped
+  code is the proven pipeline around them. Prove any model out in shadow mode
+  before ever enabling Active.
+
 ## [1.1.1] - 2026-07-10
 
 ### Fixed
