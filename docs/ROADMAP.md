@@ -198,18 +198,24 @@ rollout, data governance). Planned, not started — every item below is ⬜.
   comes when folded into the enforce daemon, which has the DNS watcher);
   connections open+closed inside one 2s poll are missed; a pre-existing
   connection's duration is measured from first-seen, not its true start.*
-- ◐ **4b. Anomaly scorer (unsupervised, no external data).** **Trainer done**
-  (`scripts/train_anomaly.py`): reads `flow_features`, trains an Isolation Forest
-  on your own flows, exports ONNX + a feature-spec JSON (the contract with the
-  on-device vector builder — 8 features: log duration, log bytes in/out, out
-  ratio, is-https, is-http, is-signed, hour). Validated off-device: on 500
-  synthetic flows the exported model scores in ONNX Runtime and puts 19/20
-  injected anomalies among the 20 most-anomalous. **Still ⬜: the on-device
-  scorer** — `ngd` loading the ONNX model and scoring completed flows in
-  **shadow mode only** (logged, zero effect on any rule). That needs ONNX
-  Runtime vendored into the engine (~15 MB), deferred pending that dependency
-  decision. Also needs the daemon writing per-flow *scores* somewhere the
-  dashboard can show them.
+- ✅ **4b. Anomaly scorer (unsupervised, no external data).** DONE, both halves.
+  **Trainer** (`scripts/train_anomaly.py`): reads `flow_features`, trains an
+  Isolation Forest on your own flows, exports ONNX + a feature-spec JSON (the
+  contract with the on-device vector builder — 8 features: log duration, log
+  bytes in/out, out ratio, is-https, is-http, is-signed, hour). **On-device
+  scorer** (`src/core/scorer.cpp`, `ng::AnomalyScorer`): `ngd` loads the ONNX
+  model (from `anomaly.onnx` next to the DB) and scores each completed flow via
+  ONNX Runtime, writing the result to `flow_features.anomaly_score` — **shadow
+  mode only, zero effect on any rule** (`meta('ml_mode')` = shadow/active/off,
+  default shadow; `ngd features mode` sets it, `ngd features dump` shows scores).
+  ONNX Runtime v1.27.1 is **vendored** (`third_party/onnxruntime/`,
+  `onnxruntime.dll` committed) and **loaded dynamically by full path** at scoring
+  time, so the engine's core paths (enforce/record/panic, ngctl) have zero static
+  dependency on it — if the DLL or model is missing, scoring silently disables and
+  everything else runs. Verified on the VM: model + DLL load, flows scored
+  (signed HTTPS download +0.04 = normal, small short flows −0.18), *and* clean
+  graceful degradation with the DLL removed (no crash, no stray system-DLL
+  version-mismatch). Ships in the installer.
 - ⬜ **4c. Supervised classifier (public dataset).** Map CICIDS2017 or CTU-13's
   feature schema onto the subset we can actually compute ourselves (drop anything
   needing payload access). Off-device LightGBM → ONNX. Scored alongside the

@@ -110,12 +110,17 @@ bool FlowCollector::run(int seconds) {
     sqlite3_stmt* ins = nullptr;
     if (sqlite3_prepare_v2(db_.handle(),
             "INSERT INTO flow_features"
-            "(ts_utc,process_key,process_label,dest,remote_port,protocol,duration_ms,bytes_in,bytes_out,local_port)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?);",
+            "(ts_utc,process_key,process_label,dest,remote_port,protocol,duration_ms,bytes_in,bytes_out,local_port,anomaly_score)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?);",
             -1, &ins, nullptr) != SQLITE_OK) {
         fprintf(stderr, "prepare flow_features insert failed: %s\n", sqlite3_errmsg(db_.handle()));
         return false;
     }
+
+    // Optional shadow-mode scoring: load the ONNX model if one was configured
+    // (no-op if the model or onnxruntime.dll is missing - scoring just stays off).
+    if (!modelPath_.empty() && scorer_.load(modelPath_))
+        printf("anomaly model loaded (shadow mode) - scoring completed flows.\n");
 
     WSADATA wsa{}; WSAStartup(MAKEWORD(2, 2), &wsa);
     stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -131,6 +136,23 @@ bool FlowCollector::run(int seconds) {
         // (which lags the connect by ~1s) has almost always caught up.
         std::string dest = f.remoteIp;
         if (dns_) { std::string d = dns_->lookup(f.remoteIp); if (!d.empty()) dest = d; }
+
+        // Shadow-mode anomaly score (computed off the DB lock - it's ML inference,
+        // not a DB op). NULL when no model is loaded.
+        const bool haveScore = scorer_.loaded();
+        float scoreVal = 0.0f;
+        if (haveScore) {
+            SYSTEMTIME st{}; GetSystemTime(&st);   // UTC hour, matches the ISO ts_utc
+            FlowFeatureInput fi;
+            fi.durationMs = durMs;
+            fi.bytesIn = (long long)f.bytesIn;
+            fi.bytesOut = (long long)f.bytesOut;
+            fi.remotePort = (int)f.remotePort;
+            fi.isSigned = f.procKey.rfind("sig:", 0) == 0;
+            fi.hour = st.wHour;
+            scoreVal = scorer_.score(fi);
+        }
+
         // Serialize with the recorder, which writes flow_events from WFP threads.
         std::lock_guard<std::mutex> lk(db_.mutex());
         sqlite3_reset(ins);
@@ -145,6 +167,7 @@ bool FlowCollector::run(int seconds) {
         sqlite3_bind_int64(ins, 8, (sqlite3_int64)f.bytesIn);
         sqlite3_bind_int64(ins, 9, (sqlite3_int64)f.bytesOut);
         sqlite3_bind_int(ins, 10, (int)f.localPort);
+        if (haveScore) sqlite3_bind_double(ins, 11, scoreVal); else sqlite3_bind_null(ins, 11);
         if (sqlite3_step(ins) == SQLITE_DONE) ++written_;
     };
 

@@ -10,7 +10,10 @@
 // anything. Needs Administrator - enabling ESTATS collection is privileged.
 #pragma once
 
+#include "core/scorer.h"
+
 #include <atomic>
+#include <string>
 
 namespace ng {
 
@@ -35,10 +38,17 @@ public:
     void stop();
     unsigned long long written() const { return written_.load(); }
 
+    // Enable shadow-mode anomaly scoring: each completed flow is scored with the
+    // ONNX model at `onnxPath` and the score stored. A no-op (scoring disabled)
+    // if the model or onnxruntime.dll is missing. Call before run().
+    void enableScoring(const std::string& onnxPath) { modelPath_ = onnxPath; }
+
 private:
     Db& db_;
     IdentityResolver& id_;
     DnsWatcher* dns_ = nullptr;
+    std::string modelPath_;
+    AnomalyScorer scorer_;
     void* stopEvent_ = nullptr;
     std::atomic<unsigned long long> written_{ 0 };
 };

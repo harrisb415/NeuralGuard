@@ -56,6 +56,7 @@ Source: "{#SourceDir}\ngmon.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ngd.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ngctl.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ngtray.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\onnxruntime.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\dashboard\*"; DestDir: "{app}\dashboard"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

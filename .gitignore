@@ -14,6 +14,10 @@
 *.exp
 *.obj
 
+# ...but keep the vendored ONNX Runtime binaries (Phase 4 ML inference).
+!third_party/onnxruntime/lib/onnxruntime.dll
+!third_party/onnxruntime/lib/onnxruntime.lib
+
 # CMake
 CMakeCache.txt
 CMakeFiles/

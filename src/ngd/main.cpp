@@ -78,6 +78,20 @@ void MetaSet(ng::Db& db, const char* key, const char* val) {
 
 bool FeatureArchiveOn(ng::Db& db) { return MetaGet(db, "feature_archive", "0") == "1"; }
 
+// The anomaly model lives next to the policy DB, named anomaly.onnx.
+std::string ModelPathFor(const char* dbPath) {
+    std::string p = dbPath ? dbPath : "";
+    size_t s = p.find_last_of("\\/");
+    std::string dir = (s == std::string::npos) ? "." : p.substr(0, s);
+    return dir + "\\anomaly.onnx";
+}
+
+// Configure shadow-mode scoring on `collector` for `dbPath` unless ml_mode=off.
+void MaybeEnableScoring(ng::FlowCollector& collector, ng::Db& db, const char* dbPath) {
+    if (MetaGet(db, "ml_mode", "shadow") != "off")
+        collector.enableScoring(ModelPathFor(dbPath));
+}
+
 void PrintUsage() {
     printf(
         "NeuralGuard ngd - learning-mode WFP recorder\n\n"
@@ -93,7 +107,9 @@ void PrintUsage() {
         "  ngd enforce [db] [seconds]    LIVE: permit the stable baseline, default-deny the\n"
         "                                rest, and prompt the tray on novel connections.\n"
         "  ngd features [db] [seconds]   Collect completed-flow features (Phase 4 ML data).\n"
-        "  ngd features dump [db]        Show recent archived feature rows.\n"
+        "  ngd features on|off [db]      Toggle feature archival by the enforce/record daemon.\n"
+        "  ngd features mode [val] [db]  Show/set ML scoring: shadow (default) | active | off.\n"
+        "  ngd features dump [db]        Show recent archived feature rows (with anomaly score).\n"
         "  ngd features purge [db] [days] Delete feature rows older than [days] (default 30).\n"
         "  ngd -h | --help | /?          Show this help.\n\n"
         "Recording requires an elevated (Administrator) prompt.\n");
@@ -469,12 +485,12 @@ int RunFeaturesDump(ng::Db& db) {
         sqlite3_finalize(c);
     }
     printf("flow_features: %lld row(s) archived\n\n", total);
-    printf("  %-8s  %-26s  %-24s  %8s  %11s  %11s\n",
-           "time", "app", "dest:port", "dur(ms)", "bytes_in", "bytes_out");
+    printf("  %-8s  %-24s  %-22s  %7s  %10s  %10s  %7s\n",
+           "time", "app", "dest:port", "dur(ms)", "bytes_in", "bytes_out", "score");
     sqlite3_stmt* s = nullptr;
     if (sqlite3_prepare_v2(h,
             "SELECT ts_utc, COALESCE(process_label,''), COALESCE(dest,''), remote_port,"
-            " duration_ms, bytes_in, bytes_out FROM flow_features ORDER BY id DESC LIMIT 40;",
+            " duration_ms, bytes_in, bytes_out, anomaly_score FROM flow_features ORDER BY id DESC LIMIT 40;",
             -1, &s, nullptr) != SQLITE_OK)
         return 1;
     while (sqlite3_step(s) == SQLITE_ROW) {
@@ -482,12 +498,15 @@ int RunFeaturesDump(ng::Db& db) {
         std::string tm  = ts.size() >= 19 ? ts.substr(11, 8) : ts;
         std::string app = (const char*)sqlite3_column_text(s, 1);
         std::string dst = (const char*)sqlite3_column_text(s, 2);
-        if (app.size() > 26) app = app.substr(0, 25) + ">";
+        if (app.size() > 24) app = app.substr(0, 23) + ">";
         std::string dp = dst + ":" + std::to_string(sqlite3_column_int(s, 3));
-        if (dp.size() > 24) dp = dp.substr(0, 23) + ">";
-        printf("  %-8s  %-26s  %-24s  %8d  %11lld  %11lld\n",
+        if (dp.size() > 22) dp = dp.substr(0, 21) + ">";
+        char score[12];
+        if (sqlite3_column_type(s, 7) == SQLITE_NULL) snprintf(score, sizeof score, "%7s", "-");
+        else snprintf(score, sizeof score, "%+7.3f", sqlite3_column_double(s, 7));
+        printf("  %-8s  %-24s  %-22s  %7d  %10lld  %10lld  %s\n",
                tm.c_str(), app.c_str(), dp.c_str(), sqlite3_column_int(s, 4),
-               (long long)sqlite3_column_int64(s, 5), (long long)sqlite3_column_int64(s, 6));
+               (long long)sqlite3_column_int64(s, 5), (long long)sqlite3_column_int64(s, 6), score);
     }
     sqlite3_finalize(s);
     return 0;
@@ -500,6 +519,24 @@ int RunFeaturesDump(ng::Db& db) {
 // ngd features purge [db] [days]  - delete rows older than [days] (default 30)
 int RunFeatures(int argc, char** argv) {
     const char* sub = (argc >= 3) ? argv[2] : nullptr;
+
+    // `mode` sets/shows the ML scoring mode; its value arg isn't a db path.
+    if (sub && strcmp(sub, "mode") == 0) {
+        const char* val = (argc >= 4) ? argv[3] : nullptr;
+        const char* dbp = (argc >= 5) ? argv[4] : "ngpolicy.db";
+        ng::Db db;
+        if (!db.open(dbp)) return 1;
+        if (val) {
+            if (strcmp(val, "shadow") && strcmp(val, "active") && strcmp(val, "off")) {
+                fprintf(stderr, "mode must be one of: shadow | active | off\n");
+                return 1;
+            }
+            MetaSet(db, "ml_mode", val);
+        }
+        printf("ml_mode = %s%s\n", MetaGet(db, "ml_mode", "shadow").c_str(), val ? " (updated)" : "");
+        return 0;
+    }
+
     const bool isDump  = sub && strcmp(sub, "dump") == 0;
     const bool isPurge = sub && strcmp(sub, "purge") == 0;
     const bool isOn    = sub && strcmp(sub, "on") == 0;
@@ -543,6 +580,7 @@ int RunFeatures(int argc, char** argv) {
     ng::IdentityResolver resolver(db);
     resolver.init();
     ng::FlowCollector collector(db, resolver);
+    MaybeEnableScoring(collector, db, dbPath);
     g_collector = &collector;
     SetConsoleCtrlHandler(CtrlHandler, TRUE);
     printf("ngd - collecting completed-flow features to %s%s. Press Ctrl+C to stop.\n",
@@ -636,9 +674,11 @@ int main(int argc, char** argv) {
         SetConsoleCtrlHandler(CtrlHandler, TRUE);
         SetMode(db, "enforcing");
 
-        // Phase 4a: optionally archive completed-flow features in the background,
-        // correlated to domains via the same DNS watcher.
+        // Phase 4a/4b: optionally archive completed-flow features in the
+        // background, correlated to domains via the same DNS watcher and scored
+        // (shadow mode) if a model is present.
         ng::FlowCollector collector(db, resolver, &dns);
+        MaybeEnableScoring(collector, db, dbPath);
         std::thread featThread;
         const bool feat = FeatureArchiveOn(db);
         if (feat) {
@@ -669,8 +709,10 @@ int main(int argc, char** argv) {
            seconds > 0 ? " (timed)" : "");
     SetMode(db, "learning");
 
-    // Phase 4a: optionally archive completed-flow features while learning.
+    // Phase 4a/4b: optionally archive completed-flow features while learning,
+    // scored in shadow mode if a model is present.
     ng::FlowCollector collector(db, resolver, &dns);
+    MaybeEnableScoring(collector, db, dbPath);
     std::thread featThread;
     const bool feat = FeatureArchiveOn(db);
     if (feat) {

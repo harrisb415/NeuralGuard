@@ -80,11 +80,16 @@ const char* kSchema =
     "  duration_ms   INTEGER,"         // observed lifetime of the connection
     "  bytes_in      INTEGER,"
     "  bytes_out     INTEGER,"
-    "  local_port    INTEGER);"
+    "  local_port    INTEGER,"
+    "  anomaly_score REAL);"           // Phase 4b: shadow-mode ML score, NULL if unscored
     // Feature archival is off by default (privacy: it records who you talked to
     // and how much). `ngd features` collecting is itself the opt-in; this flag
     // gates future collection folded into the enforce/record daemon.
-    "INSERT OR IGNORE INTO meta(k,v) VALUES('feature_archive','0');";
+    "INSERT OR IGNORE INTO meta(k,v) VALUES('feature_archive','0');"
+    // ML scoring mode: 'shadow' = score + log, zero effect on rules (default,
+    // even across upgrades); 'active' = scores may feed demotions (Phase 4d,
+    // not yet wired); 'off' = don't score.
+    "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_mode','shadow');";
 }  // namespace
 
 bool Db::open(const char* path) {
@@ -103,6 +108,8 @@ bool Db::open(const char* path) {
     sqlite3_exec(db_, "ALTER TABLE flow_events ADD COLUMN image_id INTEGER;",
                  nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "ALTER TABLE flow_events ADD COLUMN remote_domain TEXT;",
+                 nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE flow_features ADD COLUMN anomaly_score REAL;",
                  nullptr, nullptr, nullptr);
     return true;
 }

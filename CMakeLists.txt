@@ -34,8 +34,13 @@ add_library(ngcore STATIC
   src/core/habit.cpp
   src/core/enforcer.cpp
   src/core/flowstats.cpp
+  src/core/scorer.cpp
   src/core/prompt.cpp)
 target_include_directories(ngcore PUBLIC src)
+# ONNX Runtime headers (C++ API) for the anomaly scorer. Headers only - the DLL
+# is loaded dynamically at runtime, so nothing links its import lib and the
+# engine has no static dependency on the ML runtime.
+target_include_directories(ngcore PRIVATE third_party/onnxruntime/include)
 target_compile_definitions(ngcore PUBLIC ${NG_DEFS})
 target_compile_options(ngcore PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 # fwpuclnt = WFP API; uuid = predefined FWPM_LAYER_*/CONDITION_* GUIDs;
@@ -54,6 +59,12 @@ add_executable(ngd src/ngd/main.cpp src/ngd/recorder.cpp src/ngd/enforce.cpp src
 target_compile_definitions(ngd PRIVATE ${NG_DEFS})
 target_compile_options(ngd PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 target_link_libraries(ngd PRIVATE ngcore fwpuclnt ws2_32)
+# ngd loads onnxruntime.dll dynamically at runtime for Phase-4b shadow scoring.
+# Stage it next to the exe so it's found; it's optional - ngd runs fine without.
+add_custom_command(TARGET ngd POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_SOURCE_DIR}/third_party/onnxruntime/lib/onnxruntime.dll"
+    "$<TARGET_FILE_DIR:ngd>/onnxruntime.dll")
 
 # --- ngctl (Phase 2): firewall control (enforcement + panic) ----------------
 add_executable(ngctl src/ngctl/main.cpp)

@@ -42,6 +42,10 @@ New-Item -ItemType Directory -Force -Path "$stage\dashboard" | Out-Null
 foreach ($exe in "ngmon.exe", "ngd.exe", "ngctl.exe", "ngtray.exe") {
     Copy-Item (Join-Path $engineOut $exe) $stage
 }
+# onnxruntime.dll: ngd loads it at runtime for Phase-4b shadow scoring (optional -
+# ngd runs fine without it). The engine build stages it next to ngd.exe.
+$ort = Join-Path $engineOut "onnxruntime.dll"
+if (Test-Path $ort) { Copy-Item $ort $stage } else { Write-Warning "onnxruntime.dll not found; installed build won't score flows" }
 Copy-Item "$dashOut\*" "$stage\dashboard" -Recurse -Force
 Write-Host "Staged: $stage"
 
