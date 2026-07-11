@@ -250,15 +250,25 @@ rollout, data governance). Planned, not started — every item below is ⬜.
   `demote`→baseline round-trip; live capture-and-demote couldn't be reproduced
   over SSH because the collector's `GetTcpTable2` doesn't see SSH-spawned traffic —
   an env quirk, not a code defect: real interactive-session flows are captured.)*
-- ⬜ **4e. The feedback loop.** Every prompt decision (Allow once / Always allow /
-  Block) becomes a labeled example in `feedback_labels`. A manual retraining script
-  folds these into the next offline LightGBM run alongside the public dataset. Set
-  expectations correctly: prompts get rare as Phases 2–3 do their job, so this
-  dataset grows slowly *by design* — it's for periodic recalibration against your
-  own environment, not a fast-turnaround feedback loop.
-- ⬜ **4f. Weekly digest + optional LLM narration.** Surfaces anomaly/supervised
-  flags in the still-open Phase-3 weekly digest delivery item. An offline LLM may
-  turn it into prose — advisory only, it never enforces.
+- ✅ **4e. The feedback loop.** DONE. Every enforce prompt
+  verdict — and each autonomy auto-allow — becomes a `feedback_labels` row via
+  `EnforceDaemon::recordFeedback`: allow / once / auto-allow → label 0 (benign),
+  block → label 1 (malicious). `ngd feedback` shows the dataset;
+  `ngd feedback export <csv>` writes `duration_ms,bytes_in,bytes_out,remote_port,
+  label` (byte counts joined from the matching completed `flow_features`; a blocked
+  flow never completed, so those default to 0 and only the port-derived features
+  carry signal). `train_supervised.py --feedback <csv>` folds these in alongside
+  the public dataset (same 6-feature contract; verified on synthetic rows). Grows
+  slowly *by design* — prompts get rare as the baseline learns, so it's periodic
+  recalibration, not a fast loop.
+- ✅ **4f. Weekly digest + optional LLM narration.** DONE.
+  `ngd digest` gained a Phase-4 tail: ML demotions / review flags (`ml_flags`),
+  the top-`P(malicious)` and most-anomalous completed flows (`flow_features`), and
+  a one-line feedback summary. All advisory — none of it ever enforced.
+  `scripts/narrate_digest.py` turns a piped digest into prose, offline-first
+  (local Ollama → optional Anthropic API → dependency-free template fallback),
+  always stamped advisory-only. *(An in-app dashboard digest is a future nicety;
+  the CLI is the delivery mechanism.)*
 - ✅ **4g. Dashboard surface (the WinUI GUI catches up to Phase 4).** DONE, first
   cut. Until now every Phase-4 feature was CLI-only (`ngd features …`), invisible
   in the dashboard — and DESIGN.md always intended scores to be *watched* in the

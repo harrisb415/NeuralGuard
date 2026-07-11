@@ -20,6 +20,7 @@ class IdentityResolver;
 class DnsWatcher;
 class Enforcer;
 class HabitTracker;
+struct Identity;
 
 // Read-only inspector: prints the stable (app, port) permits `ngd enforce` would
 // install right now - the same query, including Phase 4d demotion exclusions -
@@ -47,6 +48,8 @@ private:
     int  readAutonomy();     // meta('autonomy'): 0 prompt, 1 auto-allow known, 2 auto-allow all
     bool appKnown(const std::string& key);  // app already has a learned habit
     void recordEvent(const void* ev);  // persist to flow_events + update habits (live feed)
+    void recordFeedback(const Identity& idn, const std::string& dest, int port,
+                        const char* decision, int label);  // Phase 4e: log a prompt verdict
     void worker();           // drains the prompt queue (blocking prompts here)
 
     struct Req { std::string devPath, dest; int port; };

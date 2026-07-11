@@ -137,6 +137,30 @@ void EnforceDaemon::recordEvent(const void* evp) {
     }
 }
 
+// Phase 4e: log one prompt verdict as a labeled training example. Called off the
+// WFP callback thread (from worker()), so a plain prepared insert under the DB
+// lock is fine. label: 0 = benign (allowed), 1 = malicious (blocked).
+void EnforceDaemon::recordFeedback(const Identity& idn, const std::string& dest, int port,
+                                   const char* decision, int label) {
+    std::lock_guard<std::mutex> lk(db_.mutex());
+    sqlite3_stmt* s = nullptr;
+    if (sqlite3_prepare_v2(db_.handle(),
+            "INSERT INTO feedback_labels"
+            "(ts_utc,process_key,process_label,app_path,dest,remote_port,protocol,decision,label)"
+            " VALUES(?,?,?,?,?,?,6,?,?);", -1, &s, nullptr) != SQLITE_OK)
+        return;
+    bindText(s, 1, util::IsoNow());
+    bindText(s, 2, idn.key);
+    bindText(s, 3, idn.label);
+    bindText(s, 4, idn.path);
+    bindText(s, 5, dest);
+    sqlite3_bind_int(s, 6, port);
+    bindText(s, 7, decision);
+    sqlite3_bind_int(s, 8, label);
+    sqlite3_step(s);
+    sqlite3_finalize(s);
+}
+
 void EnforceDaemon::handleDrop(const void* evp) {
     const FWPM_NET_EVENT5* ev = static_cast<const FWPM_NET_EVENT5*>(evp);
     if (ev->type != FWPM_NET_EVENT_TYPE_CLASSIFY_DROP) return;
@@ -183,12 +207,17 @@ void EnforceDaemon::worker() {
         if (d == 'A' || d == 'O') {
             if (!idn.path.empty())
                 enf_.addPermitAppId(util::Widen(idn.path).c_str(), (uint16_t)req.port, IPPROTO_TCP);
+            // Phase 4e: the user (or autonomy policy) accepted this - a benign label.
+            recordFeedback(idn, req.dest, req.port,
+                           autoAllow ? "auto-allow" : (d == 'O' ? "once" : "allow"), 0);
             fprintf(stderr, "[enforce] %s  %s -> %s:%d\n", autoAllow ? "AUTO-ALLOW" : "ALLOW",
                     label.c_str(), req.dest.c_str(), req.port);
         } else if (d == 0) {
             fprintf(stderr, "[enforce] (tray unreachable) %s -> %s:%d stays blocked\n",
                     label.c_str(), req.dest.c_str(), req.port);
         } else {
+            // Phase 4e: the user rejected this - a malicious label.
+            recordFeedback(idn, req.dest, req.port, "block", 1);
             fprintf(stderr, "[enforce] BLOCK  %s -> %s:%d\n", label.c_str(), req.dest.c_str(), req.port);
         }
     }

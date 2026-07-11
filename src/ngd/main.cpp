@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -104,7 +105,9 @@ void PrintUsage() {
         "                                (default ngpolicy.db). [seconds] auto-stops;\n"
         "                                otherwise runs until Ctrl+C.\n"
         "  ngd dump [db]                 Print the learned baseline + recent events.\n"
-        "  ngd digest [db]               A 'what's new' digest of the learned baseline.\n"
+        "  ngd digest [db]               A 'what's new' digest of the baseline + ML flags.\n"
+        "  ngd feedback [db]             Show prompt-verdict training labels (Phase 4e).\n"
+        "  ngd feedback export <csv> [db]  Export labels as trainer CSV.\n"
         "  ngd compact [db]              Decay habit counts to now and evict faded ones.\n"
         "  ngd novelty [db]              Rank habits by novelty (rare + recently seen).\n"
         "  ngd promote [db]              Show stable vs provisional (app, port) pairs.\n"
@@ -196,7 +199,109 @@ int RunDigest(ng::Db& db) {
         "SELECT count(DISTINCT dest), process_label FROM habits"
         " GROUP BY process_label ORDER BY 1 DESC LIMIT 10;");
 
+    // -- Phase 4: what the ML tier flagged. Advisory - these never enforced on
+    // their own; demotions only bite in active mode, everything else is shadow. --
+    DigestQuery(h, "-- ML demotions / review flags (Phase 4d) --",
+        "SELECT kind, process_label, dest||':'||remote_port, printf('%.2f', score)"
+        " FROM ml_flags ORDER BY id DESC LIMIT 10;");
+
+    DigestQuery(h, "-- most suspicious completed flows (top P(malicious)) --",
+        "SELECT printf('%.2f', malicious_score), process_label, dest||':'||remote_port"
+        " FROM flow_features WHERE malicious_score IS NOT NULL"
+        " ORDER BY malicious_score DESC, id DESC LIMIT 8;");
+
+    DigestQuery(h, "-- most anomalous completed flows (lowest anomaly score) --",
+        "SELECT printf('%.3f', anomaly_score), process_label, dest||':'||remote_port"
+        " FROM flow_features WHERE anomaly_score IS NOT NULL"
+        " ORDER BY anomaly_score ASC, id DESC LIMIT 8;");
+
+    sqlite3_stmt* fb = nullptr;
+    sqlite3_prepare_v2(h,
+        "SELECT count(*), sum(CASE WHEN label=1 THEN 1 ELSE 0 END) FROM feedback_labels;",
+        -1, &fb, nullptr);
+    if (sqlite3_step(fb) == SQLITE_ROW && sqlite3_column_int(fb, 0) > 0)
+        printf("\n-- feedback (Phase 4e) --\n  %d verdict(s) recorded, %d blocked."
+               "  Export for retraining: ngd feedback export <csv>\n",
+               sqlite3_column_int(fb, 0), sqlite3_column_int(fb, 1));
+    sqlite3_finalize(fb);
+
     return 0;
+}
+
+// Phase 4e: show the feedback-label dataset (prompt verdicts as training labels).
+int RunFeedbackDump(ng::Db& db) {
+    sqlite3* h = db.handle();
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(h,
+        "SELECT count(*), sum(CASE WHEN label=0 THEN 1 ELSE 0 END),"
+        " sum(CASE WHEN label=1 THEN 1 ELSE 0 END) FROM feedback_labels;", -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW)
+        printf("feedback_labels: %d total  (%d benign / %d malicious)\n",
+               sqlite3_column_int(s, 0), sqlite3_column_int(s, 1), sqlite3_column_int(s, 2));
+    sqlite3_finalize(s);
+    printf("  %-8s  %-10s  %-5s  %-22s  %s\n", "time", "decision", "label", "app", "dest:port");
+    sqlite3_prepare_v2(h,
+        "SELECT ts_utc, decision, label, COALESCE(process_label,''), COALESCE(dest,''), remote_port"
+        " FROM feedback_labels ORDER BY id DESC LIMIT 40;", -1, &s, nullptr);
+    int n = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        std::string ts = (const char*)sqlite3_column_text(s, 0);
+        std::string tm = ts.size() >= 19 ? ts.substr(11, 8) : ts;
+        std::string app = (const char*)sqlite3_column_text(s, 3);
+        if (app.size() > 22) app = app.substr(0, 21) + ">";
+        std::string dp = std::string((const char*)sqlite3_column_text(s, 4)) + ":" +
+                         std::to_string(sqlite3_column_int(s, 5));
+        printf("  %-8s  %-10s  %-5d  %-22s  %s\n", tm.c_str(),
+               (const char*)sqlite3_column_text(s, 1), sqlite3_column_int(s, 2), app.c_str(), dp.c_str());
+        ++n;
+    }
+    sqlite3_finalize(s);
+    if (!n) printf("  (no feedback yet - prompt verdicts land here as you run `ngd enforce`)\n");
+    return 0;
+}
+
+// Phase 4e: export the labeled examples as a CSV the offline trainer folds in
+// (train_supervised.py --feedback). Each feedback row is joined to a matching
+// completed flow for its byte counts; blocked connections never completed, so
+// their byte features default to 0 (the port-derived features still carry signal).
+int RunFeedbackExport(ng::Db& db, const char* path) {
+    std::ofstream out(path);
+    if (!out) { fprintf(stderr, "cannot open %s for writing\n", path); return 1; }
+    out << "duration_ms,bytes_in,bytes_out,remote_port,label\n";
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(db.handle(),
+        "SELECT COALESCE(MAX(ff.duration_ms),0), COALESCE(MAX(ff.bytes_in),0),"
+        " COALESCE(MAX(ff.bytes_out),0), fl.remote_port, fl.label"
+        " FROM feedback_labels fl"
+        " LEFT JOIN flow_features ff ON ff.process_key=fl.process_key"
+        "   AND ff.dest=fl.dest AND ff.remote_port=fl.remote_port"
+        " GROUP BY fl.id;", -1, &s, nullptr);
+    int n = 0;
+    while (s && sqlite3_step(s) == SQLITE_ROW) {
+        out << sqlite3_column_int(s, 0) << ',' << (long long)sqlite3_column_int64(s, 1) << ','
+            << (long long)sqlite3_column_int64(s, 2) << ',' << sqlite3_column_int(s, 3) << ','
+            << sqlite3_column_int(s, 4) << '\n';
+        ++n;
+    }
+    sqlite3_finalize(s);
+    out.close();
+    printf("exported %d labeled example(s) to %s (feed to train_supervised.py --feedback).\n", n, path);
+    return 0;
+}
+
+// ngd feedback [db]                - show the feedback-label dataset
+// ngd feedback export <csv> [db]   - export labels as trainer CSV
+int RunFeedback(int argc, char** argv) {
+    const char* sub = (argc >= 3) ? argv[2] : nullptr;
+    if (sub && strcmp(sub, "export") == 0) {
+        if (argc < 4) { fprintf(stderr, "usage: ngd feedback export <csv> [db]\n"); return 1; }
+        ng::Db db;
+        if (!db.open(argc >= 5 ? argv[4] : "ngpolicy.db")) return 1;
+        return RunFeedbackExport(db, argv[3]);
+    }
+    ng::Db db;
+    if (!db.open(sub ? sub : "ngpolicy.db")) return 1;
+    return RunFeedbackDump(db);
 }
 
 // Promotion report: classify each observed (app, port) as STABLE (seen on
@@ -727,6 +832,9 @@ int main(int argc, char** argv) {
         if (!db.open(argc >= 3 ? argv[2] : "ngpolicy.db")) return 1;
         return ng::PrintBaseline(db) < 0 ? 1 : 0;
     }
+
+    // `feedback` shows / exports the Phase 4e prompt-verdict training labels.
+    if (argc >= 2 && strcmp(argv[1], "feedback") == 0) return RunFeedback(argc, argv);
 
     const char* mode = "record";
     const char* dbPath = "ngpolicy.db";

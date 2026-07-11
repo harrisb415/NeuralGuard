@@ -70,6 +70,24 @@ def featurize(dur_ms, bytes_in, bytes_out, port):
     ]
 
 
+def load_feedback(path):
+    """Phase 4e: fold in the user's own labels exported by `ngd feedback export`.
+    Columns: duration_ms,bytes_in,bytes_out,remote_port,label. These are captured
+    from real prompt verdicts on this machine, so they carry no distribution gap -
+    but they're few (prompts get rare as the baseline learns) and blocked flows
+    have zero byte counts, so treat them as recalibration, not a training base."""
+    X, y = [], []
+    with open(path, newline="", encoding="utf-8", errors="replace") as fh:
+        for row in csv.DictReader(fh):
+            try:
+                X.append(featurize(float(row["duration_ms"]), float(row["bytes_in"]),
+                                   float(row["bytes_out"]), int(float(row["remote_port"]))))
+                y.append(int(float(row["label"])))
+            except (ValueError, KeyError):
+                continue
+    return X, y
+
+
 def load_dataset(paths):
     X, y = [], []
     for path in paths:
@@ -113,6 +131,8 @@ def main():
     ap.add_argument("--data", required=True, help="CICIDS2017 CSV file, or a directory of *.csv")
     ap.add_argument("--out", default="models/supervised.onnx")
     ap.add_argument("--estimators", type=int, default=200)
+    ap.add_argument("--feedback", help="optional CSV from `ngd feedback export` - folds your "
+                                       "own prompt verdicts in alongside the public dataset")
     args = ap.parse_args()
 
     import numpy as np
@@ -126,6 +146,14 @@ def main():
         sys.exit(f"no CSVs found at {args.data}")
 
     X, y = load_dataset(paths)
+    n_feedback = 0
+    if args.feedback:
+        fX, fy = load_feedback(args.feedback)
+        n_feedback = len(fy)
+        print(f"folded in {n_feedback} feedback label(s) from {args.feedback} "
+              f"({n_feedback - sum(fy)} benign, {sum(fy)} malicious)")
+        X += fX
+        y += fy
     if not X:
         sys.exit("no usable rows parsed from the dataset")
     Xn = np.array(X, dtype=np.float32)
@@ -156,6 +184,7 @@ def main():
         "n_features": len(FEATURE_NAMES),
         "n_rows_trained": len(y),
         "n_malicious": n_bad,
+        "n_feedback_folded": n_feedback,
         "output": "P(malicious) in [0,1]; higher = more likely bad",
         "note": "feature order is the contract with the ngd-side supervised vector builder",
     }

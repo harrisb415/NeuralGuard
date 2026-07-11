@@ -111,7 +111,23 @@ const char* kSchema =
     // Confidence gates for active mode. Supervised >= malicious => demote;
     // anomaly <= anomaly (more negative = more anomalous) => review.
     "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_malicious_threshold','0.9');"
-    "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_anomaly_threshold','-0.15');";
+    "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_anomaly_threshold','-0.15');"
+    // Phase 4e: the feedback loop. Every enforcement prompt decision (and each
+    // autonomy auto-allow) is logged here as a labeled example - the user's own
+    // verdict on an (app, dest, port). A manual retraining script folds these into
+    // the next offline LightGBM run. label: 0 = benign (allowed), 1 = malicious
+    // (blocked). Grows slowly by design - prompts get rare as the baseline learns.
+    "CREATE TABLE IF NOT EXISTS feedback_labels("
+    "  id INTEGER PRIMARY KEY,"
+    "  ts_utc        TEXT,"
+    "  process_key   TEXT,"
+    "  process_label TEXT,"
+    "  app_path      TEXT,"
+    "  dest          TEXT,"
+    "  remote_port   INTEGER,"
+    "  protocol      INTEGER,"
+    "  decision      TEXT,"           // 'allow' | 'once' | 'block' | 'auto-allow'
+    "  label         INTEGER);";      // 0 = benign, 1 = malicious
 }  // namespace
 
 bool Db::open(const char* path) {
