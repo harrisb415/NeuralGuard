@@ -68,6 +68,19 @@ namespace winrt::NeuralGuard::implementation
             tb.ButtonHoverForegroundColor(winrt::Windows::UI::Color{ 255, 255, 255, 255 });
         }
 
+        // Window/taskbar icon: AppWindow doesn't inherit the exe's embedded .rc
+        // icon on its own, so point it at the loose copy deployed next to the
+        // exe (NeuralGuard.rc covers Explorer/shortcut icons; this covers the
+        // live window, taskbar, and Alt-Tab).
+        {
+            wchar_t exePath[MAX_PATH]{};
+            GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+            std::wstring dir(exePath);
+            size_t p = dir.find_last_of(L"\\/");
+            if (p != std::wstring::npos) dir = dir.substr(0, p);
+            AppWindow().SetIcon(dir + L"\\NeuralGuard.ico");
+        }
+
         colW_ = Application::Current().Resources().Lookup(box_value(L"ColW")).as<NeuralGuard::ColWidths>();
 
         timer_ = DispatcherTimer{};

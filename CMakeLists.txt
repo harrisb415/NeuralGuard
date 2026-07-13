@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(NeuralGuard VERSION 1.3.0 LANGUAGES C CXX)
+project(NeuralGuard VERSION 1.3.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -77,11 +77,13 @@ target_link_libraries(ngctl PRIVATE ngcore ws2_32)
 # --- ngtray (Phase 2c): system-tray UI; launches the WinUI dashboard --------
 # The old native Win32 dashboard was replaced by the WinUI 3 app under gui/;
 # the tray now just shells out to that dashboard\NeuralGuard.exe.
-add_executable(ngtray WIN32 src/ngtray/main.cpp)
+add_executable(ngtray WIN32 src/ngtray/main.cpp src/ngtray/ngtray.rc)
 target_include_directories(ngtray PRIVATE src)
 target_compile_definitions(ngtray PRIVATE ${NG_DEFS})
 target_compile_options(ngtray PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
-target_link_libraries(ngtray PRIVATE user32 shell32)
+# ngcore (ng::Db) so the tray can read meta('mode') to drive the live tray-state
+# icon, and reset it after Panic - see UpdateTrayIcon()/StopAndPanic() in main.cpp.
+target_link_libraries(ngtray PRIVATE ngcore user32 shell32)
 # Run the tray elevated: one UAC at launch, then its buttons (and the
 # dashboard it launches, which inherits the token) need none.
 if(MSVC)

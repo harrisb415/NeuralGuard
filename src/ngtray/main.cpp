@@ -12,17 +12,27 @@
 
 #include <windows.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 
 #include <string>
 #include <thread>
 
+#include "core/db.h"
+
 namespace {
 
 constexpr UINT WM_TRAY = WM_APP + 1;
+constexpr UINT ID_TIMER_MODE = 1;
 enum { ID_STATUS = 1, ID_PANIC = 2, ID_QUIT = 3, ID_DASHBOARD = 4 };
+
+// Icon resource ids from ngtray.rc - the four live tray-state glyphs.
+enum { IDI_TRAY_LEARNING = 10, IDI_TRAY_ENFORCING = 11, IDI_TRAY_PANIC = 12, IDI_TRAY_OFFLINE = 13 };
 
 NOTIFYICONDATAW g_nid{};
 HINSTANCE g_hInst = nullptr;
+int g_curIconId = 0;   // last icon resource id set, so we only touch the shell icon on change
+
+void RunCtl(const wchar_t* sub);   // forward decl - defined below, used by StopAndPanic
 
 std::wstring ExeDir() {
     wchar_t path[MAX_PATH];
@@ -30,6 +40,88 @@ std::wstring ExeDir() {
     std::wstring s = path;
     size_t p = s.find_last_of(L"\\/");
     return (p == std::wstring::npos) ? L"." : s.substr(0, p);
+}
+
+std::string DbPathU8() {
+    std::wstring w = ExeDir() + L"\\ngpolicy.db";
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    std::string s(n, 0);
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), (int)w.size(), s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+// meta('mode') as ngd left it: "learning" | "enforcing" | "idle" (or missing -
+// no db yet, or ngd never ran). Anything but the two active states reads as
+// "offline" for tray purposes - idle and "no db" look the same to the user.
+std::string ReadMode() {
+    ng::Db d;
+    if (!d.open(DbPathU8().c_str())) return "offline";
+    std::string mode = "offline";
+    sqlite3_stmt* s = nullptr;
+    if (sqlite3_prepare_v2(d.handle(), "SELECT v FROM meta WHERE k='mode';", -1, &s, nullptr) == SQLITE_OK) {
+        if (sqlite3_step(s) == SQLITE_ROW) {
+            const char* t = (const char*)sqlite3_column_text(s, 0);
+            if (t && *t) mode = t;
+        }
+        sqlite3_finalize(s);
+    }
+    return mode;
+}
+
+// Swap the tray icon + tooltip to match live mode. Cheap to call often - it
+// only touches the shell icon when the resource id actually changes.
+void UpdateTrayIcon() {
+    std::string mode = ReadMode();
+    int id = IDI_TRAY_OFFLINE;
+    const wchar_t* label = L"idle";
+    if (mode == "learning") { id = IDI_TRAY_LEARNING; label = L"learning"; }
+    else if (mode == "enforcing") { id = IDI_TRAY_ENFORCING; label = L"enforcing"; }
+
+    if (id == g_curIconId) return;
+    g_curIconId = id;
+    g_nid.hIcon = LoadIconW(g_hInst, MAKEINTRESOURCEW(id));
+    swprintf_s(g_nid.szTip, L"NeuralGuard - %s", label);
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+}
+
+// Panic must be honest: ngctl panic only pulls the WFP filters, but a running
+// ngd worker keeps meta('mode') pinned at 'enforcing'/'learning' - the tray
+// would keep showing green/cyan after the user just asked it to stop. So kill
+// the worker and reset the mode ourselves (same fix as the dashboard's
+// MainWindow::StopDaemons), then flash the red Panic icon immediately for
+// feedback; the next poll tick settles it to grey once the reset lands.
+void StopAndPanic() {
+    g_curIconId = IDI_TRAY_PANIC;
+    g_nid.hIcon = LoadIconW(g_hInst, MAKEINTRESOURCEW(IDI_TRAY_PANIC));
+    wcscpy_s(g_nid.szTip, L"NeuralGuard - panic");
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap != INVALID_HANDLE_VALUE) {
+        PROCESSENTRY32W pe{}; pe.dwSize = sizeof(pe);
+        if (Process32FirstW(snap, &pe)) {
+            do {
+                if (_wcsicmp(pe.szExeFile, L"ngd.exe") == 0) {
+                    if (HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID)) {
+                        TerminateProcess(h, 0);
+                        CloseHandle(h);
+                    }
+                }
+            } while (Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+    }
+
+    ng::Db d;
+    if (d.open(DbPathU8().c_str())) {
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(d.handle(),
+            "INSERT INTO meta(k,v) VALUES('mode','idle') ON CONFLICT(k) DO UPDATE SET v='idle';",
+            -1, &s, nullptr);
+        sqlite3_step(s); sqlite3_finalize(s);
+    }
+
+    RunCtl(L"panic");   // visible ngctl output confirming filters were removed
 }
 
 // Run `ngctl <cmd>` elevated, keeping a console open so the output is visible.
@@ -143,11 +235,15 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             switch (LOWORD(w)) {
                 case ID_DASHBOARD: OpenDashboard(); break;
                 case ID_STATUS: RunCtl(L"status"); break;
-                case ID_PANIC:  RunCtl(L"panic");  break;
+                case ID_PANIC:  StopAndPanic();     break;
                 case ID_QUIT:   DestroyWindow(h);  break;
             }
             return 0;
+        case WM_TIMER:
+            if (w == ID_TIMER_MODE) UpdateTrayIcon();
+            return 0;
         case WM_DESTROY:
+            KillTimer(h, ID_TIMER_MODE);
             Shell_NotifyIconW(NIM_DELETE, &g_nid);
             PostQuitMessage(0);
             return 0;
@@ -184,9 +280,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR pCmdLine, int) {
     g_nid.uID = 1;
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAY;
-    g_nid.hIcon = LoadIconW(nullptr, IDI_SHIELD);  // stock shield - fits a firewall
-    wcscpy_s(g_nid.szTip, L"NeuralGuard");
+    g_curIconId = IDI_TRAY_OFFLINE;
+    g_nid.hIcon = LoadIconW(hInst, MAKEINTRESOURCEW(IDI_TRAY_OFFLINE));
+    wcscpy_s(g_nid.szTip, L"NeuralGuard - idle");
     Shell_NotifyIconW(NIM_ADD, &g_nid);
+    UpdateTrayIcon();   // pick up real mode immediately instead of waiting for the first tick
 
     // Startup balloon so it's obvious the tray came up.
     g_nid.uFlags |= NIF_INFO;
@@ -194,6 +292,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR pCmdLine, int) {
     wcscpy_s(g_nid.szInfo, L"Tray running. Right-click for Panic.");
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+
+    // Poll the live mode so the tray icon reflects learning/enforcing/idle
+    // without needing the dashboard open.
+    SetTimer(hwnd, ID_TIMER_MODE, 2000, nullptr);
 
     // Listen for connection prompts from the privileged daemon.
     std::thread(PipeServer).detach();

@@ -126,6 +126,18 @@
     <Manifest Include="app.manifest" />
   </ItemGroup>
   <ItemGroup>
+    <ResourceCompile Include="NeuralGuard.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Loose copy next to the exe so MainWindow can AppWindow().SetIcon() it
+         at runtime (the .rc entry above covers Explorer/taskbar/Alt-Tab, but
+         WinUI's AppWindow doesn't auto-inherit the exe's resource icon). -->
+    <None Include="NeuralGuard.ico">
+      <DeploymentContent>true</DeploymentContent>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="App.xaml.h">
       <DependentUpon>App.xaml</DependentUpon>

@@ -37,6 +37,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 LicenseFile=..\LICENSE
+SetupIconFile=..\assets\icons\neuralguard.ico
 OutputDir=..\dist
 OutputBaseFilename=NeuralGuard-Setup-{#AppVersion}
 Compression=lzma2

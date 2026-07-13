@@ -1,0 +1,8 @@
+// Resource id 1 is the exe's own icon (Explorer, taskbar, shortcuts). 10-13
+// are the four live tray-state glyphs, loaded by id and swapped at runtime as
+// meta('mode') changes - see main.cpp's UpdateTrayIcon().
+1  ICON "..\\..\\assets\\icons\\neuralguard.ico"
+10 ICON "..\\..\\assets\\icons\\tray-learning.ico"
+11 ICON "..\\..\\assets\\icons\\tray-enforcing.ico"
+12 ICON "..\\..\\assets\\icons\\tray-panic.ico"
+13 ICON "..\\..\\assets\\icons\\tray-offline.ico"

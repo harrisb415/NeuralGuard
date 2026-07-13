@@ -1,0 +1,4 @@
+// Embeds the app icon as the exe's resource icon (resource id 1, conventionally
+// the first icon = the one Explorer/taskbar/Alt-Tab show), so NeuralGuard.exe
+// carries the shield mark instead of the generic WinUI app icon.
+1 ICON "NeuralGuard.ico"
