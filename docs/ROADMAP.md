@@ -220,16 +220,26 @@ territory — not claimed here without the driver.
   route — `curl -6` fails identically enforced or not), but the v6 catch-all is a
   structural mirror of the proven v4 one at the parallel layer.
 
-### Phase C — Inbound enforcement (most gated).
-- **Inbound Tier-0 first, before any deny filter** (anti-lockout core): loopback +
-  link-local; **ICMPv6 Neighbor Discovery / Router Advertisement** (permit — IPv6
-  dies without it); DHCP/DHCPv6; and the **management channel** (SSH/RDP from the
-  local subnet) so we can never lock the box out.
-- Install inbound baseline permits from Phase-A inbound habits, then inbound
-  default-deny at `RECV_ACCEPT_V4/V6`. **Shadow (log-only) mode first** — record
-  what inbound-deny *would* block for a few days — then flip to enforce.
-- Inbound prompt UX is a design call (auto-permit-known + log vs. prompt-per-conn;
-  a listening server makes per-connection prompts noisy). Decide when we get here.
+### Phase C — Inbound enforcement (most gated). ◐ PRIMITIVE DONE
+- ✅ **Inbound enforcement primitive + anti-lockout Tier-0.** `Enforcer::
+  enableInboundDefaultDeny` installs, at `RECV_ACCEPT_V4/V6`, the anti-lockout
+  exempts FIRST (weight 15) — **SSH 22 / RDP 3389** local ports, DHCP 68 / DHCPv6
+  546, loopback, link-local — then a catch-all block (weight 0). `addPermitAppId
+  Inbound` permits an app to accept on a local port (baseline inbound permit,
+  weight 12). `ngctl enforce-in <seconds>` runs it standalone with the same timed
+  dead-man switch. (ICMPv6 ND is NOT at RECV_ACCEPT — it's transport-layer, so
+  inbound default-deny here doesn't touch it; that's Phase D.)
+- ✅ **VM-verified with the real host→VM path:** a listener on non-exempt port
+  9999 was reachable at baseline (True), **BLOCKED during `enforce-in`** (14
+  inbound filters active → False), reachable again after revert; a NEW SSH
+  connection (port 22 exempt) worked throughout — **the anti-lockout holds, you
+  can't get locked out.** (Testing gotcha: overlapping manual enforcers share the
+  provider GUID, so one instance's panic clears them all — run one at a time.)
+- ⬜ **Remaining (C2):** wire inbound into the always-on daemon (`ngd enforce`
+  installs inbound baseline permits from the Phase-A inbound habits + inbound
+  default-deny), behind a **shadow/log-only mode first** (record what inbound-deny
+  *would* block before it blocks). Inbound prompt UX is a design call (auto-permit-
+  known + log vs. prompt-per-conn; a listening server makes per-conn prompts noisy).
 
 ### Phase D — Transport-layer ICMP coverage + docs.
 - Add `OUTBOUND/INBOUND_TRANSPORT_V4/V6` filters so ICMP/ICMPv6 isn't a silent gap

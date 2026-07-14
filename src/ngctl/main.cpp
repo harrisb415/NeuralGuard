@@ -44,8 +44,10 @@ void PrintUsage() {
         "  ngctl status                Show installed NeuralGuard filter count.\n"
         "  ngctl block <ipv4> [port]   Add a block filter for a remote IPv4[:port] (TCP).\n"
         "  ngctl allow <ipv4> [port]   Add a permit filter for a remote IPv4[:port] (TCP).\n"
-        "  ngctl enforce <seconds>     Default-deny outbound IPv4 for <seconds>, then\n"
+        "  ngctl enforce <seconds>     Default-deny outbound IPv4+IPv6 for <seconds>, then\n"
         "                              auto-revert (Tier-0 exempt; inbound untouched).\n"
+        "  ngctl enforce-in <seconds>  Default-deny INBOUND IPv4+IPv6 for <seconds>, then\n"
+        "                              auto-revert (SSH/RDP/DHCP/loopback exempt).\n"
         "  ngctl enforce-baseline <db> <seconds> [min-conns]\n"
         "                              Permit STABLE (app, port) pairs from <db> (seen on\n"
         "                              >= min-conns connections, default 3), default-deny\n"
@@ -143,8 +145,33 @@ int main(int argc, char** argv) {
             enf.panic();
             return 1;
         }
-        printf("ENFORCE: default-deny outbound IPv4 ON (%d filters). "
+        printf("ENFORCE: default-deny outbound IPv4+IPv6 ON (%d filters). "
                "Tier-0 exempt; inbound untouched.\n", enf.countRules());
+        printf("Auto-reverting in %d s...\n", secs);
+        fflush(stdout);
+        Sleep((DWORD)secs * 1000);
+        int n = enf.panic();
+        printf("Reverted (removed %d filter(s)). Failing open.\n", n);
+        return 0;
+    }
+    if (strcmp(cmd, "enforce-in") == 0) {
+        // Inbound default-deny in isolation, with the same dead-man switch. The
+        // anti-lockout Tier-0 (SSH 22 / RDP 3389 / DHCP / loopback / link-local)
+        // is installed first, so a new SSH connection still works while active.
+        int secs = (argc >= 3) ? atoi(argv[2]) : 0;
+        if (secs <= 0) {
+            fprintf(stderr, "usage: ngctl enforce-in <seconds>  (duration required; auto-reverts)\n");
+            return 2;
+        }
+        ng::Enforcer enf;
+        if (!enf.open()) return 1;
+        if (!enf.enableInboundDefaultDeny()) {
+            fprintf(stderr, "inbound enforce failed; reverting.\n");
+            enf.panic();
+            return 1;
+        }
+        printf("ENFORCE: default-deny INBOUND IPv4+IPv6 ON (%d filters). "
+               "SSH/RDP/DHCP/loopback/link-local exempt; outbound untouched.\n", enf.countRules());
         printf("Auto-reverting in %d s...\n", secs);
         fflush(stdout);
         Sleep((DWORD)secs * 1000);

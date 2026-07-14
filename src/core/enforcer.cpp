@@ -50,6 +50,29 @@ int DeleteOurFiltersInLayer(HANDLE eng, const GUID& layer) {
     return deleted;
 }
 
+// Add one filter at an arbitrary layer (used for the inbound RECV_ACCEPT layers;
+// the outbound addV4/addV6 keep their own copies so the proven paths are untouched).
+bool AddFilter(HANDLE eng, const GUID& layer, const GUID& provider, const GUID& sublayer,
+               bool block, void* condsV, unsigned nc, unsigned char weight, const wchar_t* name) {
+    FWPM_FILTER0 filter{};
+    filter.layerKey = layer;
+    filter.subLayerKey = sublayer;
+    filter.providerKey = const_cast<GUID*>(&provider);
+    filter.displayData.name = const_cast<wchar_t*>(name);
+    filter.action.type = block ? FWP_ACTION_BLOCK : FWP_ACTION_PERMIT;
+    filter.weight.type = FWP_UINT8;
+    filter.weight.uint8 = weight;
+    filter.numFilterConditions = nc;
+    filter.filterCondition = static_cast<FWPM_FILTER_CONDITION0*>(condsV);
+    UINT64 id = 0;
+    DWORD e = FwpmFilterAdd0(eng, &filter, nullptr, &id);
+    if (e != ERROR_SUCCESS) {
+        fprintf(stderr, "FwpmFilterAdd0(%ls) failed: 0x%08lX\n", name, e);
+        return false;
+    }
+    return true;
+}
+
 int CountOurFiltersInLayer(HANDLE eng, const GUID& layer) {
     HANDLE h = nullptr;
     FWPM_FILTER_ENUM_TEMPLATE0 t{};
@@ -377,6 +400,111 @@ bool Enforcer::enableDefaultDeny() {
     ok &= addPermitRemotePortV6(547, IPPROTO_UDP);  // DHCPv6 (client -> server)
     ok &= addPermitRemotePortV6(123, IPPROTO_UDP);  // NTP
     ok &= addV6(true, nullptr, 0, 0, L"NeuralGuard default-deny (outbound v6)");
+    return ok;
+}
+
+// --- Inbound (RECV_ACCEPT) enforcement (Phase C) ---------------------------
+
+bool Enforcer::addPermitLocalPortIn(uint16_t localPort, uint8_t proto) {
+    // proto + LOCAL port (the service port being connected TO) - version-agnostic,
+    // so install at both inbound layers.
+    FWPM_FILTER_CONDITION0 c[2]{};
+    c[0].fieldKey = FWPM_CONDITION_IP_PROTOCOL;
+    c[0].matchType = FWP_MATCH_EQUAL;
+    c[0].conditionValue.type = FWP_UINT8;
+    c[0].conditionValue.uint8 = proto;
+    c[1].fieldKey = FWPM_CONDITION_IP_LOCAL_PORT;
+    c[1].matchType = FWP_MATCH_EQUAL;
+    c[1].conditionValue.type = FWP_UINT16;
+    c[1].conditionValue.uint16 = localPort;
+    HANDLE eng = (HANDLE)engine_;
+    bool ok = AddFilter(eng, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, kProviderGuid, kSubLayerGuid,
+                        false, c, 2, 15, L"NeuralGuard inbound exempt (port)");
+    ok = AddFilter(eng, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, kProviderGuid, kSubLayerGuid,
+                   false, c, 2, 15, L"NeuralGuard inbound exempt (port v6)") && ok;
+    return ok;
+}
+
+bool Enforcer::addPermitCidrInV4(uint32_t addrHost, uint32_t maskHost) {
+    FWP_V4_ADDR_AND_MASK am{}; am.addr = addrHost; am.mask = maskHost;
+    FWPM_FILTER_CONDITION0 c{};
+    c.fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
+    c.matchType = FWP_MATCH_EQUAL;
+    c.conditionValue.type = FWP_V4_ADDR_MASK;
+    c.conditionValue.v4AddrMask = &am;
+    return AddFilter((HANDLE)engine_, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, kProviderGuid,
+                     kSubLayerGuid, false, &c, 1, 15, L"NeuralGuard inbound exempt (subnet)");
+}
+
+bool Enforcer::addPermitCidrInV6(const unsigned char addr[16], unsigned char prefixLen) {
+    FWP_V6_ADDR_AND_MASK am{};
+    memcpy(am.addr, addr, 16);
+    am.prefixLength = prefixLen;
+    FWPM_FILTER_CONDITION0 c{};
+    c.fieldKey = FWPM_CONDITION_IP_REMOTE_ADDRESS;
+    c.matchType = FWP_MATCH_EQUAL;
+    c.conditionValue.type = FWP_V6_ADDR_MASK;
+    c.conditionValue.v6AddrMask = &am;
+    return AddFilter((HANDLE)engine_, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, kProviderGuid,
+                     kSubLayerGuid, false, &c, 1, 15, L"NeuralGuard inbound exempt (subnet v6)");
+}
+
+bool Enforcer::enableInboundDefaultDeny() {
+    bool ok = true;
+    // ANTI-LOCKOUT FIRST: the management channels are ALWAYS permitted inbound
+    // (weight 15), installed before the catch-all so a bad baseline can never cut
+    // off SSH/RDP. This is what makes inbound default-deny safe to turn on at all.
+    ok &= addPermitLocalPortIn(22, IPPROTO_TCP);    // SSH
+    ok &= addPermitLocalPortIn(3389, IPPROTO_TCP);  // RDP
+    ok &= addPermitLocalPortIn(68, IPPROTO_UDP);    // DHCP reply
+    ok &= addPermitLocalPortIn(546, IPPROTO_UDP);   // DHCPv6 reply
+    // Loopback + link-local peers (both versions).
+    ok &= addPermitCidrInV4(0x7F000000, 0xFF000000);  // 127.0.0.0/8
+    ok &= addPermitCidrInV4(0xA9FE0000, 0xFFFF0000);  // 169.254.0.0/16 link-local
+    static const unsigned char kLoopback6[16]  = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1};  // ::1
+    static const unsigned char kLinkLocal6[16] = {0xfe, 0x80};                        // fe80::/10
+    ok &= addPermitCidrInV6(kLoopback6, 128);
+    ok &= addPermitCidrInV6(kLinkLocal6, 10);
+    // Catch-all inbound block (weight 0) at both inbound layers.
+    HANDLE eng = (HANDLE)engine_;
+    ok &= AddFilter(eng, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, kProviderGuid, kSubLayerGuid,
+                    true, nullptr, 0, 0, L"NeuralGuard default-deny (inbound v4)");
+    ok &= AddFilter(eng, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, kProviderGuid, kSubLayerGuid,
+                    true, nullptr, 0, 0, L"NeuralGuard default-deny (inbound v6)");
+    return ok;
+}
+
+bool Enforcer::addPermitAppIdInbound(const wchar_t* dosPath, uint16_t localPort, uint8_t proto) {
+    FWP_BYTE_BLOB* appId = nullptr;
+    if (FwpmGetAppIdFromFileName0(dosPath, &appId) != ERROR_SUCCESS || !appId) return false;
+
+    FWPM_FILTER_CONDITION0 c[3]{};
+    UINT32 nc = 0;
+    c[nc].fieldKey = FWPM_CONDITION_ALE_APP_ID;
+    c[nc].matchType = FWP_MATCH_EQUAL;
+    c[nc].conditionValue.type = FWP_BYTE_BLOB_TYPE;
+    c[nc].conditionValue.byteBlob = appId;
+    ++nc;
+    if (proto) {
+        c[nc].fieldKey = FWPM_CONDITION_IP_PROTOCOL;
+        c[nc].matchType = FWP_MATCH_EQUAL;
+        c[nc].conditionValue.type = FWP_UINT8;
+        c[nc].conditionValue.uint8 = proto;
+        ++nc;
+    }
+    if (localPort) {
+        c[nc].fieldKey = FWPM_CONDITION_IP_LOCAL_PORT;
+        c[nc].matchType = FWP_MATCH_EQUAL;
+        c[nc].conditionValue.type = FWP_UINT16;
+        c[nc].conditionValue.uint16 = localPort;
+        ++nc;
+    }
+    HANDLE eng = (HANDLE)engine_;
+    bool ok = AddFilter(eng, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, kProviderGuid, kSubLayerGuid,
+                        false, c, nc, 12, L"NeuralGuard inbound baseline permit");
+    ok = AddFilter(eng, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, kProviderGuid, kSubLayerGuid,
+                   false, c, nc, 12, L"NeuralGuard inbound baseline permit (v6)") && ok;
+    FwpmFreeMemory0((void**)&appId);
     return ok;
 }
 

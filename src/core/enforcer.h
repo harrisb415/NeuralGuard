@@ -28,6 +28,20 @@ public:
     // on success.
     bool enableDefaultDeny();
 
+    // Turn on default-deny for INBOUND accepts (ALE_AUTH_RECV_ACCEPT_V4/V6): a
+    // catch-all block plus the anti-lockout Tier-0 permits installed FIRST -
+    // SSH (22) + RDP (3389) local ports, DHCP/DHCPv6 replies, loopback and
+    // link-local peers. Inbound default-deny only affects NEW inbound accepts to
+    // your listening services; the return traffic of connections you initiated
+    // outbound is never re-classified here, so it is unaffected. Call panic() to
+    // revert. Returns true on success.
+    bool enableInboundDefaultDeny();
+
+    // Permit an application to ACCEPT inbound connections (by its on-disk path),
+    // optionally restricted to a local service port / protocol (0 = any). Used to
+    // auto-permit the learned inbound baseline before inbound default-deny.
+    bool addPermitAppIdInbound(const wchar_t* dosPath, uint16_t localPort, uint8_t proto);
+
     // Permit a specific application (by its on-disk path) to make outbound IPv4
     // connections, optionally restricted to a remote port / protocol (0 = any).
     // Used to auto-permit the observed baseline before default-deny.
@@ -61,6 +75,11 @@ private:
     bool addPermitRemotePortV4(uint16_t port, uint8_t proto);
     bool addPermitCidrV6(const unsigned char addr[16], unsigned char prefixLen);
     bool addPermitRemotePortV6(uint16_t port, uint8_t proto);
+    // Inbound (RECV_ACCEPT) Tier-0 helpers - exempt by local service port (both
+    // versions) or by remote peer subnet. weight 15, above the inbound catch-all.
+    bool addPermitLocalPortIn(uint16_t localPort, uint8_t proto);
+    bool addPermitCidrInV4(uint32_t addrHost, uint32_t maskHost);
+    bool addPermitCidrInV6(const unsigned char addr[16], unsigned char prefixLen);
     void* engine_ = nullptr;  // HANDLE
 };
 
