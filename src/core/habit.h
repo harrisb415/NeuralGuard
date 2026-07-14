@@ -19,10 +19,13 @@ class HabitTracker {
 public:
     explicit HabitTracker(Db& db) : db_(db) {}
 
-    // Record one observed connection. `connToken` is the 5-tuple used for
-    // dedup; `tsIso`/`nowEpoch` are the event time; `hour` 0-23, `dow` 0-6 (0=Sun).
+    // Record one observed connection. `direction` is "out" (ALE connect) or "in"
+    // (ALE recv-accept); `port` is the service port (remote outbound, local
+    // inbound); for inbound `dest` is "" (the peer varies, so it's not part of
+    // the identity). `connToken` is the 5-tuple used for dedup; `tsIso`/`nowEpoch`
+    // are the event time; `hour` 0-23, `dow` 0-6 (0=Sun).
     void observe(const std::string& processKey, const std::string& processLabel,
-                 const std::string& dest, int port, int proto,
+                 const std::string& dest, int port, int proto, const std::string& direction,
                  const std::string& tsIso, double nowEpoch, int hour, int dow,
                  const std::string& connToken);
 

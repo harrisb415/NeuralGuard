@@ -30,6 +30,11 @@ private:
     void* stopEvent_ = nullptr;   // HANDLE
     void* insStmt_   = nullptr;   // sqlite3_stmt*
     std::atomic<unsigned long long> count_{0};
+    // Run-time ids of the 4 ALE connect/accept layers, resolved once in run() so
+    // handleEvent can map an event's layerId to a definitive direction (0xFFFF
+    // = unresolved). See ngwfp::ResolveAleLayers / DirectionOf.
+    unsigned short aleConnV4_ = 0xFFFF, aleConnV6_ = 0xFFFF,
+                   aleAcceptV4_ = 0xFFFF, aleAcceptV6_ = 0xFFFF;
 };
 
 }  // namespace ng

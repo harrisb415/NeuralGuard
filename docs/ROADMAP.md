@@ -105,7 +105,11 @@ It's safe — it's read-only. Stop when a normal day is ~95% covered by learned 
   `(application, remote port)` from the DB, then default-deny the rest (auto-revert).
   Verified against the live baseline (84 permits): known app+port flows, unobserved
   is blocked, DNS/SSH keep working. Per-(app,port) granularity is the safe first cut.
-- ⬜ Extend default-deny to IPv6; per-destination/domain tightening.
+- ⬜ **Full coverage — both directions, both IP versions (see "Full-coverage
+  enforcement" section below).** Today enforcement is outbound-IPv4-only, and
+  learning infers direction from a remote-port heuristic (`< 49152`) with real
+  edge cases. The plan below closes every connection-attributable gap.
+- ⬜ Per-destination/domain tightening (still open, separate from the above).
 - ◐ `ngtray` — native Win32 tray (icon + Status / **Panic** / Quit + startup
   balloon) **and the notify-pipe + prompt**: tray runs a `\\.\pipe\neuralguard`
   server; `ngctl notify <app> <dest> <port>` prompts the user (balloon + Allow
@@ -159,6 +163,78 @@ blocks and a manageable prompt rate.
   enforce daemon per drop.
 - ⬜ Weekly digest delivery (`ngd digest` exists as an on-demand report; no
   scheduled delivery mechanism yet).
+
+## Full-coverage enforcement — both directions, both IP versions
+
+**Goal:** zero coverage gaps. Today enforcement is **outbound-IPv4-only**, and the
+learning path infers direction from a remote-port heuristic (`remotePort < 49152`
+in `recorder.cpp`/`enforce.cpp`) that has real edge cases (an outbound flow to a
+high remote port is wrongly excluded; an inbound flow from a low source port is
+wrongly included). A firewall that lets traffic slip by — or wrongly blocks it —
+because it *guessed* the direction isn't doing its job.
+
+**The insight that makes this clean:** direction is not something to infer — WFP
+assigns it by **layer**. Each ALE connection layer *is* a (direction, IP version):
+`ALE_AUTH_CONNECT_V4/V6` = outbound, `ALE_AUTH_RECV_ACCEPT_V4/V6` = inbound. So the
+fix is to (a) enforce at all four layers, and (b) read the layer/direction the OS
+already stamps on every net event (`layerId` in the classify union member;
+`msFwpDirection` on drops) instead of guessing from ports. The `< 49152` heuristic
+gets **deleted**, not patched.
+
+**Critical safety fact:** inbound default-deny at `RECV_ACCEPT` does NOT break
+outbound connections' return traffic — `RECV_ACCEPT` only fires on *new* inbound
+accepts, never on the reply of a flow you initiated outbound (or a DNS response to
+your query). So "filter inbound" affects your *listening services* (SSH, RDP, file
+sharing), not your browsing.
+
+**Honest scope of "zero gaps":** complete for all connection-attributable traffic
+in user-mode WFP — TCP connects/accepts + UDP flows, both directions, both
+versions, at the ALE layers, plus the transport layers for ICMP/ICMPv6. Truly
+below-ALE raw sockets and per-packet inspection remain Phase 5 (kernel callout)
+territory — not claimed here without the driver.
+
+### Phase A — Learning correctness (read-only, zero risk). ← IN PROGRESS
+- Read `layerId` from the classify event's typed union member → derive true
+  (direction, version); cross-check drops via `msFwpDirection`. Add a
+  `layerId → {direction, version}` helper in `wfp_util.h`.
+- **Delete the `remotePort < 49152` heuristic** in `recorder.cpp` + `enforce.cpp`.
+- Direction-aware habits: outbound keys on the **remote** service port, inbound on
+  **your local** service port. Add a `direction` column to `habits` (additive
+  migration; existing rows backfill to `out`). Full IPv6 addresses stored/compared.
+- Payoff: baseline starts learning inbound + IPv6 correctly, with a real signal,
+  before any enforcement change — accumulates the inbound baseline Phase C needs
+  while risking nothing. Immediately fixes the high-port bug.
+
+### Phase B — IPv6 outbound enforcement (moderate risk; mirrors today's v4 path).
+- Generalize the enforcer's filter helpers to `(layer, version)`; add
+  `FWP_BYTE_ARRAY16` / `FWP_V6_ADDR_MASK` address conditions. Mirror the v4 baseline
+  / default-deny / permits onto `CONNECT_V6`.
+- Extend outbound Tier-0 to v6: `::1`, `fe80::/10`, `fc00::/7`, IPv6 DNS, DHCPv6
+  (546/547), NTP. Closes the biggest live hole — IPv6 outbound is unfiltered today.
+
+### Phase C — Inbound enforcement (most gated).
+- **Inbound Tier-0 first, before any deny filter** (anti-lockout core): loopback +
+  link-local; **ICMPv6 Neighbor Discovery / Router Advertisement** (permit — IPv6
+  dies without it); DHCP/DHCPv6; and the **management channel** (SSH/RDP from the
+  local subnet) so we can never lock the box out.
+- Install inbound baseline permits from Phase-A inbound habits, then inbound
+  default-deny at `RECV_ACCEPT_V4/V6`. **Shadow (log-only) mode first** — record
+  what inbound-deny *would* block for a few days — then flip to enforce.
+- Inbound prompt UX is a design call (auto-permit-known + log vs. prompt-per-conn;
+  a listening server makes per-connection prompts noisy). Decide when we get here.
+
+### Phase D — Transport-layer ICMP coverage + docs.
+- Add `OUTBOUND/INBOUND_TRANSPORT_V4/V6` filters so ICMP/ICMPv6 isn't a silent gap
+  (ND explicitly permitted). Write the ADR in `DECISIONS.md` (there is currently no
+  ADR for the outbound-only choice — this replaces it).
+
+**Data model / UI (spans phases):** `habits` gains `direction` (key becomes
+`(process_key, dest, port, proto, direction)`); `rules` parses v6 + gains direction
+/ inbound `local_port`; dashboard Live/History/Baseline gain a Direction column
+(now a hard fact, not a guess). **Safety:** every inbound test uses the timed
+auto-revert dead-man switch; dynamic WFP session already means crash = fail-open
+(now covers inbound); management Tier-0 verified installed before any inbound deny;
+VM-only until shadow mode is watched on real hardware.
 
 ## Phase 3 — Habit scoring & autonomy
 

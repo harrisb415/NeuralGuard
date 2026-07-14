@@ -122,17 +122,27 @@ void EnforceDaemon::recordEvent(const void* evp) {
         sqlite3_step(ins);
     }
 
-    const bool isClassify = (strcmp(verdict, "ALLOW") == 0 || strcmp(verdict, "DROP") == 0);
-    const bool isLoopback = remote.rfind("127.", 0) == 0 || remote == "::1";
-    const bool realRemote = hasRPort && h->remotePort > 0 && h->remotePort < 49152 &&
-                            !remote.empty() && remote != "0.0.0.0" && remote != "::" && !isLoopback;
-    if (isClassify && realRemote && idn.id >= 0) {
-        std::string dest = domain.empty() ? remote : domain;
+    // Same direction-from-layer learning as Recorder::handleEvent (enforcement
+    // keeps learning the baseline). Direction from the ALE layer, not a port guess.
+    ngwfp::Dir dir = ngwfp::DirectionOf(ev, aleConnV4_, aleConnV6_, aleAcceptV4_, aleAcceptV6_);
+    const bool isLoopback = remote.rfind("127.", 0) == 0 || remote == "::1" ||
+                            local.rfind("127.", 0) == 0 || local == "::1";
+    const bool inbound = (dir == ngwfp::Dir::In);
+    const int  svcPort = inbound ? (hasLPort ? h->localPort : 0)
+                                 : (hasRPort ? h->remotePort : 0);
+    const std::string dest = inbound ? std::string()
+                                     : (domain.empty() ? remote : domain);
+    const bool realRemote = inbound ? true
+                                    : (!remote.empty() && remote != "0.0.0.0" && remote != "::");
+    if ((dir == ngwfp::Dir::Out || dir == ngwfp::Dir::In) &&
+        svcPort > 0 && idn.id >= 0 && !isLoopback && realRemote) {
+        const char* dirStr = inbound ? "in" : "out";
         SYSTEMTIME st{}; FileTimeToSystemTime(&h->timeStamp, &st);
-        std::string token = local + "|" + std::to_string(hasLPort ? h->localPort : 0) + "|" +
-                            remote + "|" + std::to_string(h->remotePort) + "|" +
+        std::string token = std::string(dirStr) + "|" + local + "|" +
+                            std::to_string(hasLPort ? h->localPort : 0) + "|" + remote + "|" +
+                            std::to_string(hasRPort ? h->remotePort : 0) + "|" +
                             std::to_string(h->ipProtocol);
-        habits_.observe(idn.key, idn.label, dest, h->remotePort, h->ipProtocol,
+        habits_.observe(idn.key, idn.label, dest, svcPort, h->ipProtocol, dirStr,
                         ts, util::UnixEpoch(h->timeStamp), st.wHour, st.wDayOfWeek, token);
     }
 }
@@ -350,6 +360,9 @@ bool EnforceDaemon::run(int seconds) {
         fprintf(stderr, "FwpmEngineOpen0 (enforce sub) failed: 0x%08lX\n", e);
         stop(); if (worker_.joinable()) worker_.join(); enf_.panic(); return false;
     }
+    // Resolve ALE layer ids so recordEvent attributes direction from the layer.
+    ngwfp::ResolveAleLayers(engine, aleConnV4_, aleConnV6_, aleAcceptV4_, aleAcceptV6_);
+
     auto setU32 = [&](FWPM_ENGINE_OPTION opt, UINT32 v) {
         FWP_VALUE0 val{}; val.type = FWP_UINT32; val.uint32 = v;
         FwpmEngineSetOption0(engine, opt, &val);

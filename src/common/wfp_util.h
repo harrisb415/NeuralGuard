@@ -72,4 +72,49 @@ inline std::string UserSid(const FWPM_NET_EVENT_HEADER3* h) {
     return out;
 }
 
+// Connection direction of a net event. Derived from the WFP LAYER the event was
+// classified at - the layer *is* the direction (ALE_AUTH_CONNECT = outbound,
+// ALE_AUTH_RECV_ACCEPT = inbound), not a guess from port numbers. Unknown means
+// the event isn't an ALE connection establishment (transport/capability/etc.)
+// and must not become a habit.
+enum class Dir { Unknown, Out, In };
+
+// Resolve the run-time layer ids of the four ALE connect/accept layers once
+// (right after the engine opens), so each net event's layerId can be mapped to a
+// definitive (direction, IP version). Fills 0xFFFF and returns false on failure.
+inline bool ResolveAleLayers(HANDLE engine, UINT16& connV4, UINT16& connV6,
+                             UINT16& acceptV4, UINT16& acceptV6) {
+    connV4 = connV6 = acceptV4 = acceptV6 = 0xFFFF;
+    auto get = [&](const GUID& key, UINT16& out) -> bool {
+        FWPM_LAYER0* layer = nullptr;
+        if (FwpmLayerGetByKey0(engine, &key, &layer) == ERROR_SUCCESS && layer) {
+            out = layer->layerId;
+            FwpmFreeMemory0(reinterpret_cast<void**>(&layer));
+            return true;
+        }
+        return false;
+    };
+    bool ok = true;
+    ok &= get(FWPM_LAYER_ALE_AUTH_CONNECT_V4, connV4);
+    ok &= get(FWPM_LAYER_ALE_AUTH_CONNECT_V6, connV6);
+    ok &= get(FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, acceptV4);
+    ok &= get(FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, acceptV6);
+    return ok;
+}
+
+// The event's direction, from its classify layerId vs the resolved ALE ids.
+inline Dir DirectionOf(const FWPM_NET_EVENT5* ev,
+                       UINT16 connV4, UINT16 connV6, UINT16 acceptV4, UINT16 acceptV6) {
+    UINT16 layerId = 0xFFFF;
+    if (ev->type == FWPM_NET_EVENT_TYPE_CLASSIFY_ALLOW && ev->classifyAllow)
+        layerId = ev->classifyAllow->layerId;
+    else if (ev->type == FWPM_NET_EVENT_TYPE_CLASSIFY_DROP && ev->classifyDrop)
+        layerId = ev->classifyDrop->layerId;
+    else
+        return Dir::Unknown;
+    if (layerId == connV4 || layerId == connV6) return Dir::Out;
+    if (layerId == acceptV4 || layerId == acceptV6) return Dir::In;
+    return Dir::Unknown;
+}
+
 }  // namespace ngwfp

@@ -37,16 +37,17 @@ const char* kSchema =
     "  id INTEGER PRIMARY KEY,"
     "  process_key   TEXT,"   // sig:<thumb> | sha:<hash> | dev:<path>
     "  process_label TEXT,"   // signer subject or image basename
-    "  dest          TEXT,"   // domain if known, else remote IP
-    "  remote_port   INTEGER,"
+    "  dest          TEXT,"   // outbound: domain/remote IP; inbound: '' (any peer)
+    "  remote_port   INTEGER,"// the SERVICE port: remote port outbound, local port inbound
     "  protocol      INTEGER,"
+    "  direction     TEXT,"   // 'out' (ALE connect) | 'in' (ALE recv-accept)
     "  count         REAL,"   // exponentially decayed observation count
     "  first_seen    TEXT,"
     "  last_seen     TEXT,"
     "  last_epoch    REAL,"   // unix seconds of last obs (for decay math)
     "  hour_hist     TEXT,"   // 24 comma-separated counts (UTC hour)
     "  dow_hist      TEXT,"   // 7 comma-separated counts (0=Sun)
-    "  UNIQUE(process_key, dest, remote_port, protocol));"
+    "  UNIQUE(process_key, dest, remote_port, protocol, direction));"
     // User-editable firewall rules. The dashboard writes these directly (no
     // per-edit elevation) and ngd enforce reads + applies them as WFP filters,
     // re-scanning when meta('rules_gen') changes so edits take effect live.
@@ -150,6 +151,12 @@ bool Db::open(const char* path) {
     sqlite3_exec(db_, "ALTER TABLE flow_features ADD COLUMN anomaly_score REAL;",
                  nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "ALTER TABLE flow_features ADD COLUMN malicious_score REAL;",
+                 nullptr, nullptr, nullptr);
+    // Direction-aware habits (both-direction learning). Existing rows are all
+    // outbound (that's all the old heuristic could learn), so default to 'out'.
+    // On an old DB the UNIQUE constraint stays keyed without direction, but
+    // inbound rows use dest='' while outbound never does, so they can't collide.
+    sqlite3_exec(db_, "ALTER TABLE habits ADD COLUMN direction TEXT DEFAULT 'out';",
                  nullptr, nullptr, nullptr);
     return true;
 }

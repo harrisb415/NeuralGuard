@@ -56,7 +56,7 @@ bool HabitTracker::newConnection(const std::string& token) {
 }
 
 void HabitTracker::observe(const std::string& key, const std::string& label,
-                           const std::string& dest, int port, int proto,
+                           const std::string& dest, int port, int proto, const std::string& direction,
                            const std::string& tsIso, double nowEpoch, int hour, int dow,
                            const std::string& connToken) {
     if (!newConnection(connToken)) return;
@@ -67,12 +67,13 @@ void HabitTracker::observe(const std::string& key, const std::string& label,
     sqlite3_stmt* s = nullptr;
     sqlite3_prepare_v2(h,
         "SELECT id, count, last_epoch, hour_hist, dow_hist FROM habits"
-        " WHERE process_key=? AND dest=? AND remote_port=? AND protocol=?;",
+        " WHERE process_key=? AND dest=? AND remote_port=? AND protocol=? AND direction=?;",
         -1, &s, nullptr);
     bindText(s, 1, key);
     bindText(s, 2, dest);
     sqlite3_bind_int(s, 3, port);
     sqlite3_bind_int(s, 4, proto);
+    bindText(s, 5, direction);
 
     if (sqlite3_step(s) == SQLITE_ROW) {
         long long id = sqlite3_column_int64(s, 0);
@@ -109,18 +110,19 @@ void HabitTracker::observe(const std::string& key, const std::string& label,
         sqlite3_stmt* i = nullptr;
         sqlite3_prepare_v2(h,
             "INSERT INTO habits"
-            "(process_key,process_label,dest,remote_port,protocol,count,first_seen,last_seen,last_epoch,hour_hist,dow_hist)"
-            " VALUES(?,?,?,?,?,1,?,?,?,?,?);", -1, &i, nullptr);
+            "(process_key,process_label,dest,remote_port,protocol,direction,count,first_seen,last_seen,last_epoch,hour_hist,dow_hist)"
+            " VALUES(?,?,?,?,?,?,1,?,?,?,?,?);", -1, &i, nullptr);
         bindText(i, 1, key);
         bindText(i, 2, label);
         bindText(i, 3, dest);
         sqlite3_bind_int(i, 4, port);
         sqlite3_bind_int(i, 5, proto);
-        bindText(i, 6, tsIso);
+        bindText(i, 6, direction);
         bindText(i, 7, tsIso);
-        sqlite3_bind_double(i, 8, nowEpoch);
-        bindText(i, 9, SerHist(hh));
-        bindText(i, 10, SerHist(dh));
+        bindText(i, 8, tsIso);
+        sqlite3_bind_double(i, 9, nowEpoch);
+        bindText(i, 10, SerHist(hh));
+        bindText(i, 11, SerHist(dh));
         sqlite3_step(i);
         sqlite3_finalize(i);
     }

@@ -59,25 +59,32 @@ void Recorder::handleEvent(const void* evOpaque) {
         if (sqlite3_step(ins) == SQLITE_DONE) ++count_;
     }
 
-    // Update the learned baseline for real outbound connections. Count only the
-    // ALE classify verdicts (not capability/other events) and require a real
-    // remote endpoint + a resolved process, to approximate one obs per connection.
-    const bool isClassify = (strcmp(verdict, "ALLOW") == 0 || strcmp(verdict, "DROP") == 0);
-    // Skip ephemeral remote ports (>= 49152): those are the peer's random port on
-    // an INBOUND connection, which would otherwise create one junk habit each. A
-    // habit is about an outbound *service* port. Also skip loopback destinations -
-    // internal IPC (e.g. a browser talking to itself), always Tier-0 exempt anyway.
-    const bool isLoopback = remote.rfind("127.", 0) == 0 || remote == "::1";
-    const bool realRemote = hasRPort && h->remotePort > 0 && h->remotePort < 49152 &&
-                            !remote.empty() && remote != "0.0.0.0" && remote != "::" &&
-                            !isLoopback;
-    if (isClassify && realRemote && idn.id >= 0) {
-        std::string dest = domain.empty() ? remote : domain;
+    // Fold genuine connection establishments into the learned baseline. Direction
+    // comes from the ALE layer the event was classified at (the layer IS the
+    // direction) - not a port-number guess. Only ALE connect/accept events count;
+    // transport/capability/other events are Unknown and skipped.
+    ngwfp::Dir dir = ngwfp::DirectionOf(ev, aleConnV4_, aleConnV6_, aleAcceptV4_, aleAcceptV6_);
+    const bool isLoopback = remote.rfind("127.", 0) == 0 || remote == "::1" ||
+                            local.rfind("127.", 0) == 0 || local == "::1";
+    // Service port = remote for outbound (where it connects), local for inbound
+    // (the port it listens on). The inbound peer varies, so it isn't part of the
+    // identity - inbound habits key on (app, local service port) with dest="".
+    const bool inbound = (dir == ngwfp::Dir::In);
+    const int  svcPort = inbound ? (hasLPort ? h->localPort : 0)
+                                 : (hasRPort ? h->remotePort : 0);
+    const std::string dest = inbound ? std::string()
+                                     : (domain.empty() ? remote : domain);
+    const bool realRemote = inbound ? true
+                                    : (!remote.empty() && remote != "0.0.0.0" && remote != "::");
+    if ((dir == ngwfp::Dir::Out || dir == ngwfp::Dir::In) &&
+        svcPort > 0 && idn.id >= 0 && !isLoopback && realRemote) {
+        const char* dirStr = inbound ? "in" : "out";
         SYSTEMTIME st{}; FileTimeToSystemTime(&h->timeStamp, &st);
-        std::string token = local + "|" + std::to_string(hasLPort ? h->localPort : 0) + "|" +
-                            remote + "|" + std::to_string(h->remotePort) + "|" +
+        std::string token = std::string(dirStr) + "|" + local + "|" +
+                            std::to_string(hasLPort ? h->localPort : 0) + "|" + remote + "|" +
+                            std::to_string(hasRPort ? h->remotePort : 0) + "|" +
                             std::to_string(h->ipProtocol);
-        habits_.observe(idn.key, idn.label, dest, h->remotePort, h->ipProtocol,
+        habits_.observe(idn.key, idn.label, dest, svcPort, h->ipProtocol, dirStr,
                         ts, util::UnixEpoch(h->timeStamp), st.wHour, st.wDayOfWeek, token);
     }
 }
@@ -111,6 +118,10 @@ bool Recorder::run() {
         fprintf(stderr, "FwpmEngineOpen0 failed: 0x%08lX (are you elevated?)\n", err);
         return false;
     }
+    // Resolve the ALE layer ids so handleEvent can attribute direction from the
+    // event's layerId (the layer is the direction) instead of guessing from ports.
+    ngwfp::ResolveAleLayers(engine, aleConnV4_, aleConnV6_, aleAcceptV4_, aleAcceptV6_);
+
     auto setU32 = [&](FWPM_ENGINE_OPTION opt, UINT32 val) {
         FWP_VALUE0 v{}; v.type = FWP_UINT32; v.uint32 = val;
         FwpmEngineSetOption0(engine, opt, &v);
