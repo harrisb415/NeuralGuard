@@ -122,6 +122,27 @@ const char* kSchema =
     // anomaly <= anomaly (more negative = more anomalous) => review.
     "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_malicious_threshold','0.9');"
     "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_anomaly_threshold','-0.15');"
+    // Inbound services WE blocked (inbound_mode='enforce'), for passive review.
+    // Inbound is never prompted: a remote party must never be able to pop a dialog
+    // on your screen, and the decision you actually want to make is per SERVICE
+    // ("should sshd be reachable?"), not per SYN. So novel inbound is blocked
+    // silently and recorded here, deduped per (app, local port, proto); the tray
+    // balloons ONCE per new service (notified) and you allow it at your leisure.
+    // Only drops from our own inbound catch-all land here - Windows Firewall's own
+    // inbound drops are not ours to offer, and would swamp the list.
+    "CREATE TABLE IF NOT EXISTS inbound_blocked("
+    "  id INTEGER PRIMARY KEY,"
+    "  app_path      TEXT,"            // normalized C:\...
+    "  process_label TEXT,"
+    "  local_port    INTEGER,"         // the service port that was connected TO
+    "  protocol      INTEGER,"
+    "  first_seen    TEXT,"
+    "  last_seen     TEXT,"
+    "  attempts      INTEGER DEFAULT 0,"
+    "  last_peer     TEXT,"            // most recent remote address seen
+    "  notified      INTEGER DEFAULT 0,"  // tray balloon shown once
+    "  allowed       INTEGER DEFAULT 0,"  // user permitted it -> joins the inbound baseline
+    "  UNIQUE(app_path, local_port, protocol));"
     // Phase 4e: the feedback loop. Every enforcement prompt decision (and each
     // autonomy auto-allow) is logged here as a labeled example - the user's own
     // verdict on an (app, dest, port). A manual retraining script folds these into

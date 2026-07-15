@@ -56,11 +56,19 @@ private:
     std::string readInboundMode();  // meta('inbound_mode'): 'off' (default) | 'enforce'
     bool appKnown(const std::string& key);  // app already has a learned habit
     void recordEvent(const void* ev);  // persist to flow_events + update habits (live feed)
+    // Record an inbound connection OUR inbound catch-all blocked, deduped per
+    // (app, local port, proto). Returns true the first time a given service is
+    // seen, which is when the tray balloons about it (once, never again).
+    bool recordInboundBlocked(const Identity& idn, int localPort, int proto,
+                              const std::string& peer, const std::string& tsIso);
     void recordFeedback(const Identity& idn, const std::string& dest, int port,
                         const char* decision, int label);  // Phase 4e: log a prompt verdict
     void worker();           // drains the prompt queue (blocking prompts here)
 
-    struct Req { std::string devPath, dest; int port; };
+    // A queued piece of user-facing work, drained off the WFP callback thread.
+    // notify=true is an inbound balloon (no dialog, no decision); otherwise it's
+    // the outbound block-notify-retry prompt.
+    struct Req { std::string devPath, dest; int port; bool notify = false; std::string label; };
 
     Db& db_;
     IdentityResolver& id_;

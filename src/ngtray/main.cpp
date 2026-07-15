@@ -160,6 +160,25 @@ std::wstring Widen(const std::string& s) {
 // button toast on unpackaged Win32 needs a COM activator; balloon + dialog is the
 // v1 that gives the same choice with far less plumbing.)
 char PromptUser(const std::string& msg) {
+    // "NOTIFY\t<label>\t<port>" = balloon only, no dialog. Inbound connections are
+    // triggered by a REMOTE party, so they must never be able to put a modal on the
+    // user's screen (that would be a remotely-triggerable interruption). We tell
+    // them once, quietly; they permit the service at their leisure in the dashboard.
+    if (msg.rfind("NOTIFY\t", 0) == 0) {
+        std::string rest = msg.substr(7);
+        std::string label = rest, port;
+        size_t t = rest.find('\t');
+        if (t != std::string::npos) { label = rest.substr(0, t); port = rest.substr(t + 1); }
+        g_nid.uFlags |= NIF_INFO;
+        wcscpy_s(g_nid.szInfoTitle, L"NeuralGuard - inbound blocked");
+        std::wstring info = Widen(label) + L" on port " + Widen(port) +
+                            L"\nOpen the dashboard to allow this service.";
+        wcsncpy_s(g_nid.szInfo, info.c_str(), _TRUNCATE);
+        Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+        g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+        return 'N';
+    }
+
     // msg is "app\tdest\tport"
     std::string app = msg, dest, port;
     size_t t1 = msg.find('\t');

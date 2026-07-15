@@ -102,6 +102,16 @@ inline bool ResolveAleLayers(HANDLE engine, UINT16& connV4, UINT16& connV6,
     return ok;
 }
 
+// The filter that produced a CLASSIFY_DROP, or 0 if the event isn't a drop.
+// Lets a caller tell ITS OWN drops from every other provider's (Windows Firewall
+// drops inbound scans constantly) - without this, a "what did we block" list is
+// mostly other people's decisions.
+inline UINT64 DropFilterId(const FWPM_NET_EVENT5* ev) {
+    if (ev->type == FWPM_NET_EVENT_TYPE_CLASSIFY_DROP && ev->classifyDrop)
+        return ev->classifyDrop->filterId;
+    return 0;
+}
+
 // The event's direction, from its classify layerId vs the resolved ALE ids.
 inline Dir DirectionOf(const FWPM_NET_EVENT5* ev,
                        UINT16 connV4, UINT16 connV6, UINT16 acceptV4, UINT16 acceptV6) {

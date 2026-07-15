@@ -127,7 +127,9 @@ void PrintUsage() {
         "  ngd inbound [on|off] [db]     Preview (no arg) or toggle INBOUND enforcement.\n"
         "                                Off by default: inbound is always learned, but only\n"
         "                                blocked once you turn it on. SSH/RDP/DHCP/loopback\n"
-        "                                stay exempt so you can't be locked out.\n"
+        "                                stay exempt so you can't be locked out. The preview\n"
+        "                                also lists inbound services we blocked, for review.\n"
+        "  ngd inbound allow <port> [db] Permit a blocked inbound service (applies live).\n"
         "  ngd update [check|apply]      Check GitHub for a newer release; 'apply' downloads\n"
         "                                the installer, verifies it, and launches it.\n"
         "  ngd -h | --help | /?          Show this help.\n\n"
@@ -834,7 +836,53 @@ int RunInbound(ng::Db& db, const char* arg) {
     }
     printf("inbound_mode = %s\n\n", MetaGet(db, "inbound_mode", "off").c_str());
     printf("--- inbound services that WOULD be permitted ---\n");
-    return ng::PrintInboundBaseline(db) < 0 ? 1 : 0;
+    if (ng::PrintInboundBaseline(db) < 0) return 1;
+
+    // The passive-review list: inbound services WE blocked. Never prompted for -
+    // the user permits them here, at their leisure.
+    printf("\n--- blocked inbound services (pending review) ---\n");
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(db.handle(),
+        "SELECT local_port, protocol, attempts, last_peer, allowed, process_label, app_path"
+        " FROM inbound_blocked ORDER BY allowed, attempts DESC;", -1, &s, nullptr);
+    printf("  %-5s %6s %8s  %-15s %-8s %s\n", "proto", "port", "attempts", "last peer", "state", "app");
+    int n = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        const char* peer = (const char*)sqlite3_column_text(s, 3);
+        const char* label = (const char*)sqlite3_column_text(s, 5);
+        const char* path = (const char*)sqlite3_column_text(s, 6);
+        printf("  %-5d %6d %8d  %-15s %-8s %s\n",
+               sqlite3_column_int(s, 1), sqlite3_column_int(s, 0), sqlite3_column_int(s, 2),
+               peer ? peer : "", sqlite3_column_int(s, 4) ? "ALLOWED" : "blocked",
+               label && *label ? label : (path ? path : ""));
+        ++n;
+    }
+    sqlite3_finalize(s);
+    if (n == 0)
+        printf("  (none - nothing of ours has blocked an inbound connection)\n");
+    else
+        printf("\nAllow one with:  ngd inbound allow <port> [db]\n");
+    return 0;
+}
+
+// `ngd inbound allow <port> [db]` - permit a blocked inbound service from the
+// review list. Bumps rules_gen so a running enforce daemon re-applies live.
+int RunInboundAllow(ng::Db& db, int port) {
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(db.handle(),
+        "UPDATE inbound_blocked SET allowed=1 WHERE local_port=?;", -1, &s, nullptr);
+    sqlite3_bind_int(s, 1, port);
+    sqlite3_step(s);
+    sqlite3_finalize(s);
+    int changed = sqlite3_changes(db.handle());
+    if (changed == 0) {
+        fprintf(stderr, "No blocked inbound service on port %d. Run `ngd inbound` to list them.\n", port);
+        return 1;
+    }
+    sqlite3_exec(db.handle(), "UPDATE meta SET v=CAST(v AS INTEGER)+1 WHERE k='rules_gen';",
+                 nullptr, nullptr, nullptr);
+    printf("Allowed inbound on port %d (%d service(s)); applies live.\n", port, changed);
+    return 0;
 }
 
 // `ngd update [check|apply]` - self-update from the latest GitHub Release.
@@ -900,6 +948,12 @@ int main(int argc, char** argv) {
     if (argc >= 2 && strcmp(argv[1], "inbound") == 0) {
         // `ngd inbound [on|off] [db]` - argv[2] is the mode only when it's
         // literally on/off/enforce; anything else is the db path.
+        // `ngd inbound allow <port> [db]` permits one blocked service.
+        if (argc >= 4 && strcmp(argv[2], "allow") == 0) {
+            ng::Db db;
+            if (!db.open(argc >= 5 ? argv[4] : "ngpolicy.db")) return 1;
+            return RunInboundAllow(db, atoi(argv[3]));
+        }
         const char* arg = nullptr;
         const char* dbp = "ngpolicy.db";
         if (argc >= 3) {

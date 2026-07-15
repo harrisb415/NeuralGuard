@@ -70,6 +70,12 @@ static const char* const kInboundBaselineSQL =
     " GROUP BY pi.image_path, fe.protocol, fe.local_port"
     " HAVING conns >= 3;";
 
+// Services the user explicitly permitted from the blocked-inbound review list.
+// Unioned with the learned baseline above: a service you allow by hand doesn't
+// have to also clear the >=3-connections stability bar to keep working.
+static const char* const kInboundAllowedSQL =
+    "SELECT app_path, protocol, local_port FROM inbound_blocked WHERE allowed = 1;";
+
 }  // namespace
 
 int EnforceDaemon::installBaseline() {
@@ -94,6 +100,18 @@ int EnforceDaemon::installInboundBaseline() {
     sqlite3_stmt* s = nullptr;
     sqlite3_prepare_v2(h, kInboundBaselineSQL, -1, &s, nullptr);
     int permits = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        const char* path = (const char*)sqlite3_column_text(s, 0);
+        int proto = sqlite3_column_int(s, 1);
+        int localPort = sqlite3_column_int(s, 2);
+        if (path && enf_.addPermitAppIdInbound(util::Widen(path).c_str(),
+                                               (uint16_t)localPort, (uint8_t)proto))
+            ++permits;
+    }
+    sqlite3_finalize(s);
+
+    // Plus anything the user allowed from the review list.
+    sqlite3_prepare_v2(h, kInboundAllowedSQL, -1, &s, nullptr);
     while (sqlite3_step(s) == SQLITE_ROW) {
         const char* path = (const char*)sqlite3_column_text(s, 0);
         int proto = sqlite3_column_int(s, 1);
@@ -180,6 +198,24 @@ void EnforceDaemon::recordEvent(const void* evp) {
         habits_.observe(idn.key, idn.label, dest, svcPort, h->ipProtocol, dirStr,
                         ts, util::UnixEpoch(h->timeStamp), st.wHour, st.wDayOfWeek, token);
     }
+
+    // Inbound WE blocked -> record it for passive review (never a prompt). Gated on
+    // the drop coming from our OWN inbound catch-all: Windows Firewall drops inbound
+    // scans constantly, and surfacing those would both swamp the list and offer the
+    // user "permits" for things we never blocked in the first place.
+    if (inbound && enf_.isOurInboundBlock(ngwfp::DropFilterId(ev)) &&
+        idn.id >= 0 && svcPort > 0) {
+        if (recordInboundBlocked(idn, svcPort, h->ipProtocol, remote, ts)) {
+            // First sighting of this service - balloon once, off this callback thread.
+            Req r; r.notify = true; r.port = svcPort;
+            r.label = idn.label.empty() ? idn.path : idn.label;
+            {
+                std::lock_guard<std::mutex> lk(qmx_);
+                queue_.push_back(r);
+            }
+            qcv_.notify_one();
+        }
+    }
 }
 
 // Phase 4e: log one prompt verdict as a labeled training example. Called off the
@@ -243,6 +279,17 @@ void EnforceDaemon::worker() {
             req = queue_.front();
             queue_.pop_front();
         }
+        // Inbound: a balloon, never a dialog (a remote party must not be able to
+        // put a modal on the user's screen). Fire and move on - there's no decision
+        // to wait for; they permit the service later in the dashboard.
+        if (req.notify) {
+            NotifyTray(req.label, req.port);
+            fprintf(stderr, "[enforce] INBOUND BLOCKED (new service) %s on port %d"
+                            " - review in the dashboard to allow\n",
+                    req.label.c_str(), req.port);
+            continue;
+        }
+
         Identity idn = id_.resolve(req.devPath);
         std::string label = idn.label.empty() ? req.devPath : idn.label;
         // Autonomy: skip the prompt when the policy says to auto-allow.
@@ -284,6 +331,48 @@ int EnforceDaemon::readAutonomy() {
     if (sqlite3_step(s) == SQLITE_ROW) v = sqlite3_column_int(s, 0);
     sqlite3_finalize(s);
     return v;
+}
+
+// Upsert one blocked-inbound service. Deduped per (app, local port, proto) so a
+// port scan hammering the same service just bumps a counter instead of spamming.
+// Returns true only on FIRST sight (notified flips 0 -> 1), which is the single
+// moment the tray balloons.
+bool EnforceDaemon::recordInboundBlocked(const Identity& idn, int localPort, int proto,
+                                         const std::string& peer, const std::string& tsIso) {
+    if (idn.path.empty() || localPort <= 0) return false;
+    std::lock_guard<std::mutex> lk(db_.mutex());
+    sqlite3* h = db_.handle();
+
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(h,
+        "INSERT INTO inbound_blocked"
+        "(app_path,process_label,local_port,protocol,first_seen,last_seen,attempts,last_peer,notified,allowed)"
+        " VALUES(?,?,?,?,?,?,1,?,0,0)"
+        " ON CONFLICT(app_path,local_port,protocol) DO UPDATE SET"
+        "   last_seen=excluded.last_seen, attempts=attempts+1, last_peer=excluded.last_peer;",
+        -1, &s, nullptr);
+    bindText(s, 1, idn.path);
+    bindText(s, 2, idn.label);
+    sqlite3_bind_int(s, 3, localPort);
+    sqlite3_bind_int(s, 4, proto);
+    bindText(s, 5, tsIso);
+    bindText(s, 6, tsIso);
+    bindText(s, 7, peer);
+    sqlite3_step(s);
+    sqlite3_finalize(s);
+
+    // Claim the one notification for this service, atomically: whoever flips
+    // notified 0 -> 1 balloons. Never re-notify, even across restarts.
+    sqlite3_prepare_v2(h,
+        "UPDATE inbound_blocked SET notified=1"
+        " WHERE app_path=? AND local_port=? AND protocol=? AND notified=0 AND allowed=0;",
+        -1, &s, nullptr);
+    bindText(s, 1, idn.path);
+    sqlite3_bind_int(s, 2, localPort);
+    sqlite3_bind_int(s, 3, proto);
+    sqlite3_step(s);
+    sqlite3_finalize(s);
+    return sqlite3_changes(h) > 0;
 }
 
 // meta('inbound_mode'): 'off' (default) = outbound-only enforcement, inbound is
@@ -365,11 +454,28 @@ int EnforceDaemon::applyRules() {
 // direction. Session permits granted via prompts are re-derived from the
 // baseline where they became habits.
 void EnforceDaemon::reapply() {
+    // clearFilters() drops EVERY filter of ours - inbound included - so the
+    // inbound half must be rebuilt here too, exactly as run() does. Miss this and
+    // any live rule edit silently fails inbound open (and `ngd inbound allow`,
+    // which bumps rules_gen to apply, would REMOVE inbound instead of permitting).
+    // Re-running enableInboundDefaultDeny also re-captures the catch-all filter
+    // ids, which change on every re-add.
     enf_.clearFilters();
     int permits = installBaseline();
     enf_.enableDefaultDeny();
     int nrules = applyRules();
-    printf("ngd enforce: re-applied (%d baseline permits, %d user rules).\n", permits, nrules);
+
+    int inPermits = 0;
+    const bool inbound = (readInboundMode() == "enforce");
+    if (inbound) {
+        inPermits = installInboundBaseline();
+        if (!enf_.enableInboundDefaultDeny())
+            fprintf(stderr, "ngd enforce: WARNING - inbound re-apply failed; inbound is now OPEN.\n");
+    }
+    std::string inNote;
+    if (inbound) inNote = ", inbound on: " + std::to_string(inPermits) + " service permits";
+    printf("ngd enforce: re-applied (%d baseline permits, %d user rules%s).\n",
+           permits, nrules, inNote.c_str());
     fflush(stdout);
 }
 

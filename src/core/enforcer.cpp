@@ -53,7 +53,8 @@ int DeleteOurFiltersInLayer(HANDLE eng, const GUID& layer) {
 // Add one filter at an arbitrary layer (used for the inbound RECV_ACCEPT layers;
 // the outbound addV4/addV6 keep their own copies so the proven paths are untouched).
 bool AddFilter(HANDLE eng, const GUID& layer, const GUID& provider, const GUID& sublayer,
-               bool block, void* condsV, unsigned nc, unsigned char weight, const wchar_t* name) {
+               bool block, void* condsV, unsigned nc, unsigned char weight, const wchar_t* name,
+               UINT64* outId = nullptr) {
     FWPM_FILTER0 filter{};
     filter.layerKey = layer;
     filter.subLayerKey = sublayer;
@@ -70,6 +71,7 @@ bool AddFilter(HANDLE eng, const GUID& layer, const GUID& provider, const GUID& 
         fprintf(stderr, "FwpmFilterAdd0(%ls) failed: 0x%08lX\n", name, e);
         return false;
     }
+    if (outId) *outId = id;
     return true;
 }
 
@@ -465,12 +467,14 @@ bool Enforcer::enableInboundDefaultDeny() {
     static const unsigned char kLinkLocal6[16] = {0xfe, 0x80};                        // fe80::/10
     ok &= addPermitCidrInV6(kLoopback6, 128);
     ok &= addPermitCidrInV6(kLinkLocal6, 10);
-    // Catch-all inbound block (weight 0) at both inbound layers.
+    // Catch-all inbound block (weight 0) at both inbound layers. Keep the filter
+    // ids so drops caused by THESE can be told apart from Windows Firewall's own
+    // inbound drops - only ours are things the user could choose to permit.
     HANDLE eng = (HANDLE)engine_;
     ok &= AddFilter(eng, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, kProviderGuid, kSubLayerGuid,
-                    true, nullptr, 0, 0, L"NeuralGuard default-deny (inbound v4)");
+                    true, nullptr, 0, 0, L"NeuralGuard default-deny (inbound v4)", &inBlockV4_);
     ok &= AddFilter(eng, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6, kProviderGuid, kSubLayerGuid,
-                    true, nullptr, 0, 0, L"NeuralGuard default-deny (inbound v6)");
+                    true, nullptr, 0, 0, L"NeuralGuard default-deny (inbound v6)", &inBlockV6_);
     return ok;
 }
 
@@ -518,6 +522,9 @@ int Enforcer::clearFilters() {
     HANDLE eng = (HANDLE)engine_;
     int deleted = 0;
     for (const GUID& layer : kLayers) deleted += DeleteOurFiltersInLayer(eng, layer);
+    // The inbound catch-alls are gone; forget their ids so a recycled filter id
+    // can never be mistaken for ours on a later drop.
+    inBlockV4_ = inBlockV6_ = 0;
     return deleted;
 }
 

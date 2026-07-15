@@ -54,6 +54,14 @@ public:
     bool applyUserRule(const wchar_t* appPath, uint32_t remoteIpv4Host,
                        uint16_t port, uint8_t proto, bool block);
 
+    // True if `filterId` is one of OUR inbound catch-all blocks - i.e. this drop
+    // is ours and the user could choose to permit it, as opposed to one of the
+    // many inbound drops Windows Firewall makes on its own. Used to keep the
+    // "blocked inbound services" review list free of other providers' decisions.
+    bool isOurInboundBlock(unsigned long long filterId) const {
+        return filterId != 0 && (filterId == inBlockV4_ || filterId == inBlockV6_);
+    }
+
     int  countRules();   // NeuralGuard filters currently installed
 
     // Delete just our filters (keep the sublayer/provider), for a live re-apply.
@@ -81,6 +89,9 @@ private:
     bool addPermitCidrInV4(uint32_t addrHost, uint32_t maskHost);
     bool addPermitCidrInV6(const unsigned char addr[16], unsigned char prefixLen);
     void* engine_ = nullptr;  // HANDLE
+    // Filter ids of the inbound catch-all blocks, so a drop can be attributed to
+    // us (see isOurInboundBlock). Reset by panic()/clearFilters().
+    unsigned long long inBlockV4_ = 0, inBlockV6_ = 0;
 };
 
 }  // namespace ng

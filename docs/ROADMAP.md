@@ -261,8 +261,32 @@ territory — not claimed here without the driver.
     service permit(s))"* and filter count hit **37** (19 outbound + 2 outbound
     baseline + 14 inbound Tier-0/catch-all + 2 inbound baseline); SSH alive
     throughout; clean revert to 0. Real DB confirmed `inbound_mode=off`.
-- ⬜ Inbound prompt UX is still a design call (auto-permit-known + log vs.
-  prompt-per-conn; a listening server makes per-conn prompts noisy).
+- ✅ **Inbound UX — silent block + passive review (never a prompt).** The outbound
+  block-notify-retry model does NOT transfer inbound, for four reasons: (1) no user
+  intent to anchor the question — *a stranger* caused it, not you; (2) it would be
+  **remote-triggerable UI** — anyone who can reach the box could pop dialogs on your
+  screen at will; (3) wrong granularity — the decision you want is per *service*
+  ("should sshd be reachable?"), not per SYN; (4) the retry mechanic doesn't exist —
+  outbound the *app* retries after Allow, but a scanner's SYN has already timed out.
+  Plus volume: anything exposed is scanned constantly.
+  - **Design:** auto-permit the learned inbound baseline, block everything else
+    **silently**, and record it in `inbound_blocked` (deduped per app+local port+proto,
+    with an attempts counter and last peer). The tray balloons **once** per new
+    service (`notified` flips 0→1 atomically), never again. The user reviews and
+    permits at leisure: `ngd inbound` lists blocked services, `ngd inbound allow
+    <port>` permits one (unioned into the inbound baseline via `kInboundAllowedSQL`,
+    so a hand-allowed service skips the >=3-connection stability bar).
+  - **Only OUR drops are surfaced.** `FwpmFilterAdd0`'s filter id is now kept for the
+    inbound catch-alls (`Enforcer::isOurInboundBlock`), so the review list can't fill
+    with the inbound drops Windows Firewall makes constantly — those aren't ours to
+    offer a permit for. Ids reset in `clearFilters()` so a recycled id can't misattribute.
+  - **Bug found + fixed while building this:** `reapply()` (any live rule edit)
+    called `clearFilters()` — which drops inbound too — then reinstalled only the
+    outbound half, silently failing inbound OPEN. It now rebuilds inbound as well,
+    which also re-captures the catch-all filter ids (they change on every re-add).
+  - VM-verified end to end: 9999 reachable → inbound on → **silently blocked** (14
+    attempts, exactly ONE balloon, listed with its peer) → `inbound allow 9999`
+    (0→3 permits) → **reachable again**; SSH alive throughout.
 
 ### Phase D — ICMP coverage + the ADR. ✅ DONE (premise disproved; no code needed)
 - **The plan here was wrong, and measuring beat assuming.** Phase D assumed ICMP

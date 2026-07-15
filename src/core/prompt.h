@@ -11,4 +11,10 @@ namespace ng {
 // Blocks until the user answers (or the tray is gone).
 char PromptTray(const std::string& app, const std::string& dest, int port);
 
+// Tell the tray to show a NON-modal balloon about an inbound service we blocked.
+// Deliberately not a prompt: inbound is triggered by a remote party, and a remote
+// party must never be able to put a dialog on the user's screen. The user reviews
+// and permits at their leisure. Returns false if the tray is unreachable.
+bool NotifyTray(const std::string& label, int localPort);
+
 }  // namespace ng
