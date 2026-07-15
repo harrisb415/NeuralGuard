@@ -376,6 +376,23 @@ service is protection before/without a login. TinyWall's shape is the target.
   reverted)"* + *"Stopped 1 foreground worker(s)"*, and 15s later both still gone —
   proving the service went through the SCM and was never hard-killed. Re-running
   against nothing prints *"Nothing to stop"* and exits 0.
+- ✅ **The installer was a third caller of the same bug — found the hard way.** Both
+  `CurStepChanged(ssInstall)` and `CurUninstallStepChanged` ran
+  `taskkill /F /IM ngd.exe`. Observed for real on the physical host: an uninstall
+  killed the service, the SCM restarted it ~5s later (during the confirmation
+  MsgBox), so `ngd uninstall`'s `ControlService(STOP)` hit a `START_PENDING`
+  service and was rejected — `DeleteService` then only *marked* it. Result: the
+  files were deleted but **a still-enforcing service was left running**, invisible
+  in Add/Remove Programs, with ngtray/ngctl/dashboard already gone so nothing could
+  stop it (and it held `ngd.exe` + the DB locked, which is why those two survived).
+  Same latent bug on upgrade: a restarted service re-locks `ngd.exe`, so the engine
+  silently doesn't get replaced. Both paths now call a shared `StopNeuralGuard`
+  (`ngd stop` via `runas`, then taskkill for the GUI processes only, which have no
+  SCM lifecycle). It returns success so a declined elevation prompt *warns* rather
+  than silently leaving a firewall behind, and the failure text now says how to
+  recover. Costs no extra UAC on the normal update path: `Updater::apply` launches
+  the installer with the default verb, so it inherits the already-elevated
+  dashboard's token. Verified: `ISCC` compiles the script clean.
 - **Still open, by design (Phase B):** the service is `SERVICE_AUTO_START` and
   `ServiceMain` hardcodes enforce, so a **reboot** still comes up enforcing
   regardless of what you left it in. Phase A only fixes the "Stop didn't stop it"

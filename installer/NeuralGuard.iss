@@ -81,18 +81,32 @@ Name: "{userstartup}\NeuralGuard"; Filename: "{app}\ngtray.exe"; Tasks: startup
 Filename: "{app}\ngtray.exe"; Description: "Launch NeuralGuard now"; Flags: nowait postinstall skipifsilent shellexec
 
 [Code]
-// An upgrade-over-a-running-install would fail to overwrite locked .exe/.dll
-// files, so make sure nothing from a previous install is still running
-// before files are copied.
-procedure CurStepChanged(CurStep: TSetupStep);
+// Stop a previous install before touching its files. The background service must
+// go through the SCM (`ngd stop`), NOT taskkill: killing ngd.exe doesn't read as
+// a stop, it reads as a crash, and the service is deliberately configured with
+// restart-on-failure - so it comes back ~5s later, still holding ngd.exe and the
+// database locked. An upgrade then silently fails to replace the engine, and an
+// uninstall leaves a running, unmanageable service behind still filtering traffic
+// (observed for real). The GUI processes have no SCM lifecycle, so taskkill is
+// right for those. Returns False if the service may have been left running - e.g.
+// an Administrator prompt was declined - so callers can warn instead of guessing.
+function StopNeuralGuard: Boolean;
 var
   ResultCode: Integer;
 begin
+  Result := True;
+  if FileExists(ExpandConstant('{app}\ngd.exe')) then
+    Result := ShellExec('runas', ExpandConstant('{app}\ngd.exe'),
+                ExpandConstant('stop "{app}\ngpolicy.db"'), '',
+                SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM ngtray.exe /IM NeuralGuard.exe',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
   if CurStep = ssInstall then
-  begin
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM ngtray.exe /IM NeuralGuard.exe /IM ngd.exe',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
+    StopNeuralGuard;   // best-effort; CloseApplications/restart-manager covers the rest
 end;
 
 // Best-effort cleanup on uninstall: remove the background service and clear
@@ -105,32 +119,32 @@ end;
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   ResultCode: Integer;
-  okSvc, okPanic: Boolean;
+  okStop, okSvc, okPanic: Boolean;
 begin
   if CurUninstallStep = usUninstall then
   begin
-    Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM ngtray.exe /IM NeuralGuard.exe /IM ngd.exe',
-      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
     // MsgBox is a blocking modal dialog - /VERYSILENT only suppresses the
     // wizard's own pages, not explicit MsgBox calls, so a silent/unattended
     // uninstall (no one present to click OK) would hang here forever unless
-    // these are skipped.
+    // these are skipped. Warn BEFORE the elevation prompts, not after.
     if not UninstallSilent then
-      MsgBox('NeuralGuard is removing its background service and any active ' +
-        'firewall rules. You may see one or two Administrator prompts - please ' +
-        'approve them so nothing is left running after uninstall.',
+      MsgBox('NeuralGuard is stopping its background service and removing any ' +
+        'active firewall rules. You may see a few Administrator prompts - please ' +
+        'approve them. If you decline, a hidden service can be left running and ' +
+        'still filtering your traffic, with the tools to stop it already deleted.',
         mbInformation, MB_OK);
 
+    okStop := StopNeuralGuard;   // SCM stop, never a kill - see StopNeuralGuard
     okSvc := ShellExec('runas', ExpandConstant('{app}\ngd.exe'), 'uninstall',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     okPanic := ShellExec('runas', ExpandConstant('{app}\ngctl.exe'), 'panic',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-    if ((not okSvc) or (not okPanic)) and (not UninstallSilent) then
-      MsgBox('One of the cleanup steps did not complete (an Administrator ' +
-        'prompt may have been declined). If NeuralGuard was enforcing, run ' +
-        '"ngctl panic" and check "sc query NeuralGuard" manually to confirm ' +
-        'nothing was left behind.', mbError, MB_OK);
+    if ((not okStop) or (not okSvc) or (not okPanic)) and (not UninstallSilent) then
+      MsgBox('One of the cleanup steps did not complete (an Administrator prompt ' +
+        'may have been declined). Check "sc query NeuralGuard" from an elevated ' +
+        'prompt: if the service still exists, run "sc stop NeuralGuard" - it is ' +
+        'marked for deletion and disappears once it actually stops. Then run ' +
+        '"ngctl panic" to clear any filters it left active.', mbError, MB_OK);
   end;
 end;
