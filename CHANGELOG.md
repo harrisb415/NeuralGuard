@@ -5,6 +5,69 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-07-15
+
+Stop actually stops, the service remembers what you left it in, and the four
+executables become two.
+
+### Fixed
+
+- **Stop didn't stop it.** The dashboard's Stop button and the tray's Panic both
+  terminated any process named `ngd.exe` — which is the background service's
+  process name too. The SCM doesn't read a kill as a stop, it reads it as a
+  *crash*, and the service is deliberately configured to restart on failure. So
+  Stop appeared to work and then silently went back to enforcing about five
+  seconds later, no reboot required. Both now ask `ngd stop`, which stops the
+  service through the SCM and only hard-kills foreground workers, which have no
+  SCM lifecycle of their own.
+- **A reboot always came up enforcing**, whatever you'd last chosen — the service
+  hardcoded enforcement on every start, and couldn't run learning mode at all. It
+  now records what you *want* (`desired_mode`) separately from what's *running*,
+  and resumes it.
+- **The uninstaller had the same bug, and it bit for real.** It killed `ngd.exe`,
+  the watchdog restarted the service during the confirmation dialog, and the
+  uninstall's own stop request was then rejected because the service was still
+  starting. The result: files deleted, gone from Add/Remove Programs, the tray and
+  control tools removed — and a **still-enforcing service left running with nothing
+  left that could stop it**. Upgrades had the same flaw in a quieter form: a
+  restarted service re-locks `ngd.exe`, so the engine silently wasn't replaced.
+- **A firewall could fail to start and report success.** If the enforcer couldn't
+  start, the service reported a clean stop with exit code 0 — no error, nothing in
+  the event log, and no restart, because the watchdog only retries on a *failure*
+  exit. It now exits with a real error, and the watchdog recovers the transient
+  cases on its own.
+- **The tray icon didn't appear** until you opened the dashboard by hand. Starting
+  at login was opt-in and unchecked, so you could install a background firewall and
+  get no icon, no prompts, and no way to stop it without a command line. It's on by
+  default now.
+
+### Changed
+
+- **Four executables are now two.** The tray was separate only because a
+  `LocalSystem` service can't show UI — but that never meant the *frontend* had to
+  be two programs, and being two meant duplicated mode polling, panic paths that
+  drifted apart, and a tray whose **Status** could only open a `cmd.exe` window
+  because it had no UI of its own. One app (`NeuralGuard.exe`) is now the tray icon
+  *and* the window; Status and Panic render in the app. `ngtray.exe` is retired,
+  and an upgrade removes the old one so it can't linger at login.
+- **The frontend asks the service instead of racing it.** Enforce / Learn / Stop /
+  Panic used to launch a whole second copy of the engine that knew nothing about
+  the installed service and fought it for the same firewall provider. They now send
+  a command to the running service, which switches mode **in place** — no restart,
+  no rival process, and no UAC prompt, since the service is already elevated.
+- **Panic is coherent.** It used to pull the filters out from under a daemon that
+  kept running and still believed it was enforcing — so the next rule edit put them
+  back. It now stops enforcement and stays stopped.
+
+### Added
+
+- `ngd mode [enforcing|learning|idle]` and `ngctl mode` — read or change what the
+  service runs, live. `ngctl status` now reports the service's mode, and `ngctl
+  panic` asks the service when one is running.
+- `ngd stop [--off]` — `--off` means *and stay off*; plain `stop` is maintenance and
+  preserves your mode, which is what an installer needs when it stops the service
+  just to replace files.
+
 ## [1.4.0] - 2026-07-14
 
 Full-coverage enforcement: **both directions, both IP versions**, with direction

@@ -1,6 +1,6 @@
 # NeuralGuard
 
-**v1.4.0** — A personal, habit-learning firewall for Windows 11 — built the
+**v1.5.0** — A personal, habit-learning firewall for Windows 11 — built the
 buildable way. Now with an on-device machine-learning tier that scores your
 connections in the background (shadow by default, never enforces on its own).
 
@@ -15,9 +15,11 @@ person on their own machine, not by a team shipping a signed kernel product.
 > **Status:** Phases 0–4 done — recording, habit learning, enforcement with
 > block-notify-retry prompts, a background Windows service, the on-device ML
 > tier (shadow by default), a WinUI 3 dashboard (`gui/`), and an in-app
-> updater are all working end to end. Enforcement now covers **both directions
+> updater are all working end to end. Enforcement covers **both directions
 > and both IP versions**, with direction read from the WFP layer rather than
-> guessed. Inbound enforcement is **opt-in** (`ngd inbound`). What's left is the
+> guessed. Inbound enforcement is **opt-in** (`ngd inbound`). v1.5.0 collapsed
+> the frontend to **one app**: the service is the only thing that touches the
+> firewall, and it remembers the mode you left it in. What's left is the
 > *optional* Phase 5 kernel callout driver — see
 > [`docs/ROADMAP.md`](docs/ROADMAP.md), [`docs/DECISIONS.md`](docs/DECISIONS.md)
 > for the coverage model, and [`CHANGELOG.md`](CHANGELOG.md) for each release.
@@ -37,11 +39,13 @@ anything genuinely new gets blocked-and-prompted, and a lightweight on-device mo
 reviews *completed* flows to decide what should be trusted next time. The AI writes
 rules; deterministic code enforces them.
 
-You drive it from a **system-tray app** (`ngtray`): a tray icon showing the current
-mode, one-click toast prompts to allow or block new connections, a dashboard window
-(live feed, recent blocks, rule management, stats), and a panic button — backed by a
-headless `ngctl` for scripting. (The tray is a separate process by necessity: the
-`ngd` service runs as `LocalSystem` in session 0 and can't show UI itself.)
+You drive it from **one app** (`NeuralGuard.exe`): a tray icon showing the current
+mode, prompts to allow or block new connections, and a dashboard window (live feed,
+recent blocks, rule management, stats) with a panic button — backed by a headless
+`ngctl` for scripting. It never does firewall work itself; it tells the `ngd`
+service what to do over a named pipe. Two processes is the floor, not a choice: the
+service runs as `LocalSystem` in session 0 and **cannot** show UI, so something in
+your session has to own the icon and answer the prompts.
 
 ## Why this exists (and what it replaces)
 
