@@ -12,6 +12,7 @@
 //
 // Requires an elevated (Administrator) prompt.
 
+#include "core/cmd.h"
 #include "core/enforcer.h"
 #include "core/db.h"
 #include "core/util.h"
@@ -23,6 +24,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 namespace {
 
@@ -40,8 +42,11 @@ void PrintUsage() {
     printf(
         "NeuralGuard ngctl - firewall control\n\n"
         "Usage:\n"
-        "  ngctl panic                 Delete ALL NeuralGuard filters (fail open).\n"
-        "  ngctl status                Show installed NeuralGuard filter count.\n"
+        "  ngctl mode [enforcing|learning|idle]\n"
+        "                              Show/switch the running service's mode, live.\n"
+        "  ngctl panic                 Stop enforcing and fail open (asks the service if\n"
+        "                              it's running; otherwise deletes filters directly).\n"
+        "  ngctl status                Show the service's mode + installed filter count.\n"
         "  ngctl block <ipv4> [port]   Add a block filter for a remote IPv4[:port] (TCP).\n"
         "  ngctl allow <ipv4> [port]   Add a permit filter for a remote IPv4[:port] (TCP).\n"
         "  ngctl enforce <seconds>     Default-deny outbound IPv4+IPv6 for <seconds>, then\n"
@@ -117,7 +122,30 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // `mode` only makes sense against the running service - it's a question about
+    // what the engine should be doing, not about individual filters.
+    if (strcmp(cmd, "mode") == 0) {
+        bool ok = false;
+        const std::string reply =
+            ng::CmdSend(argc >= 3 ? std::string("MODE ") + argv[2] : std::string("STATUS"), &ok);
+        if (!ok) {
+            fprintf(stderr, "Can't reach the NeuralGuard service.\n"
+                            "Is it installed and running?  sc query NeuralGuard\n");
+            return 1;
+        }
+        printf("%s\n", reply.c_str());
+        return reply.rfind("OK", 0) == 0 ? 0 : 1;
+    }
+
     if (strcmp(cmd, "panic") == 0) {
+        // Ask the service first if it's up. A local panic only rips the filters
+        // out from under a daemon that keeps running and still believes it's
+        // enforcing - it would re-apply them on the next rule edit. The service's
+        // own panic stops enforcing AND stays stopped.
+        bool ok = false;
+        const std::string reply = ng::CmdSend("PANIC", &ok);
+        if (ok) { printf("PANIC: %s\n", reply.c_str()); return 0; }
+
         ng::Enforcer enf;
         if (!enf.open()) return 1;
         int n = enf.panic();
@@ -125,6 +153,9 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (strcmp(cmd, "status") == 0) {
+        bool ok = false;
+        const std::string reply = ng::CmdSend("STATUS", &ok);
+        printf("service: %s\n", ok ? reply.c_str() : "not reachable (not installed or not running)");
         ng::Enforcer enf;
         if (!enf.open()) return 1;
         printf("NeuralGuard filters installed: %d\n", enf.countRules());

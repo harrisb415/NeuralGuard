@@ -27,6 +27,7 @@ endif()
 # --- ngcore: reusable core library (db, identity, signer, util) -------------
 # Linked by ngd today; by ngctl / the service / ngtray's backend later.
 add_library(ngcore STATIC
+  src/core/cmd.cpp
   src/core/db.cpp
   src/core/signer.cpp
   src/core/identity.cpp

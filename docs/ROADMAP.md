@@ -424,8 +424,39 @@ service is protection before/without a login. TinyWall's shape is the target.
     and confirmed genuinely recording (483,501 → 483,549 flow_events under real
     traffic) — the service running learning mode for the first time. Plain `ngd stop`
     preserved `desired_mode=learning`, proving the upgrade path is safe.
-- ⬜ **B2 — live control over IPC** (below). Until it lands, a mode change needs the
-  service restarted (`ngd mode X` → `ngd stop` → `sc start NeuralGuard`).
+- ✅ **B2 — live control over IPC.** The service now hosts a command channel and
+  switches modes in place, so changing what the engine does no longer means
+  restarting it or (as the dashboard did) launching a rival copy of it.
+  - **A second pipe, not the existing one.** `\\.\pipe\neuralguard`'s server is the
+    *tray* (ngd connects to it to ask the user about a block); commands run the
+    opposite way, and a pipe has one server — hence `\\.\pipe\neuralguard-cmd`
+    with ngd as server (`core/cmd.h`, shared `CmdSend` client). The roadmap's
+    "extend the existing pipe" wasn't possible; this is the same idea, corrected.
+  - **Security is structural:** the pipe takes the default DACL for a
+    LocalSystem-created pipe, which grants write to SYSTEM/Administrators only, so
+    commands require elevation with no check of ours to get wrong. The tray is
+    already elevated and the dashboard inherits its token → no UAC per action.
+  - Verbs: `STATUS`, `MODE <enforcing|learning|idle>` (persists desired_mode *and*
+    switches live), `PANIC` (revert filters, go idle, **stay** idle). `RunModeLoop`
+    re-reads desired_mode whenever a mode returns due to a switch rather than a stop.
+  - `ngctl` gained `mode`, and `panic`/`status` are now service-aware. `panic` asks
+    the service first: a *local* panic only rips filters out from under a daemon
+    that keeps running and still believes it's enforcing (it would re-apply them on
+    the next rule edit) — the service's own panic stops enforcing and stays stopped.
+  - ✅ **Fixed a silent-failure bug found while testing:** a failed enforcer start
+    reported `SERVICE_STOPPED` with **exit code 0** — indistinguishable from a
+    deliberate stop, so no event was logged and the SCM's restart policy (which only
+    retries on a *failure* exit) never fired. A firewall could fail to start and
+    report success. `RunOneMode`/`RunModeLoop` now propagate setup failure and
+    ServiceMain exits `ERROR_SERVICE_SPECIFIC_ERROR`. Verified by forcing the real
+    provider-conflict race: `WIN32_EXIT_CODE 1066` + *"terminated with the following
+    service-specific error"* in the event log, where it used to be silent — and the
+    restart policy now self-heals the transient case.
+  - **VM-verified:** enforcing (111 filters, PID 128) → `ngctl mode learning` → mode
+    switched to learning with **0 filters and the same PID 128** — in place, no
+    restart, no rival process; back to enforcing → 109 filters; `mode enforcing`
+    again → *"OK already enforcing"*; `mode bogus` → `ERR`; `ngctl panic` → service
+    stays RUNNING at `mode=idle desired=idle`, 0 filters.
 - Extend the existing `\\.\pipe\neuralguard` protocol (today: tray-notify only, one
   direction) with request/response command verbs — `MODE`, `ENFORCE`, `LEARN`,
   `STOP`, `PANIC` — so a *running* service can be told to switch modes live, instead

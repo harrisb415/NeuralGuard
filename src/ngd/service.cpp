@@ -5,14 +5,17 @@
 #include "core/enforcer.h"
 #include "core/habit.h"
 #include "core/identity.h"
+#include "core/cmd.h"
 #include "ngd/enforce.h"
 #include "ngd/recorder.h"
 
 #include <windows.h>
 #include <tlhelp32.h>
 
+#include <atomic>
 #include <cstdio>
 #include <string>
+#include <thread>
 
 namespace ng {
 namespace {
@@ -22,8 +25,22 @@ SERVICE_STATUS_HANDLE g_ssh = nullptr;
 SERVICE_STATUS g_ss{};
 EnforceDaemon* g_daemon = nullptr;
 Recorder* g_recorder = nullptr;
-HANDLE g_idleStop = nullptr;   // only used when the desired mode is 'idle'
+HANDLE g_idleStop = nullptr;   // signalled to break the 'idle' mode's wait
 std::string g_dbPath = "ngpolicy.db";
+
+// Two different reasons the currently-running mode gets told to return, and the
+// mode loop has to tell them apart: the SCM is stopping us for good, versus a
+// MODE command asking us to switch to something else and keep running.
+std::atomic<bool> g_svcStopping{false};
+std::atomic<bool> g_modeSwitch{false};
+
+// Ask whatever mode is running to return. Doesn't itself decide what happens
+// next - g_svcStopping / g_modeSwitch do.
+void SignalCurrentModeStop() {
+    if (g_daemon) g_daemon->stop();
+    if (g_recorder) g_recorder->stop();
+    if (g_idleStop) SetEvent(g_idleStop);
+}
 
 std::wstring Wide(const std::string& s) {
     int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), (int)s.size(), nullptr, 0);
@@ -85,39 +102,38 @@ void SetState(DWORD state, DWORD exitCode = 0) {
 
 DWORD WINAPI HandlerEx(DWORD ctrl, DWORD, LPVOID, LPVOID) {
     if (ctrl == SERVICE_CONTROL_STOP || ctrl == SERVICE_CONTROL_SHUTDOWN) {
+        g_svcStopping = true;
         SetState(SERVICE_STOP_PENDING);
-        if (g_daemon) g_daemon->stop();     // clean revert (panic) on the way out
-        if (g_recorder) g_recorder->stop();
-        if (g_idleStop) SetEvent(g_idleStop);
+        SignalCurrentModeStop();   // the daemon reverts its filters on the way out
     }
     return NO_ERROR;
 }
 
 void SetMetaMode(Db& db, const char* mode) { db.setMeta("mode", mode); }
 
-// Run whatever meta('desired_mode') asks for, blocking until the SCM stops us.
+// Run one mode, blocking until it's told to return (by the SCM stopping us, or by
+// a MODE command switching us to something else).
 //
-// This used to hardcode enforcement: the service enforced on every start, no
+// The service used to hardcode enforcement here: it enforced on every start no
 // matter what the user had last chosen, and 'learning' wasn't even reachable
-// (only ngd's foreground CLI ever built a Recorder). So a reboot always came up
-// enforcing - the "it always reverts to enforce" bug. desired_mode is what the
-// user WANTS; meta('mode') stays what IS running, and only this decides which.
-void RunDesiredMode(Db& db, IdentityResolver& resolver, DnsWatcher& dns, HabitTracker& habits) {
-    const std::string desired = db.meta("desired_mode", "enforcing");
-
+// (only ngd's foreground CLI ever built a Recorder). desired_mode is what the
+// user WANTS; meta('mode') stays what IS running, and this is what connects them.
+// Returns false if the mode couldn't be set up at all, which the caller turns into
+// a non-zero service exit. That distinction matters: a failed enforcer used to
+// report a perfectly clean SERVICE_STOPPED/exit-0, so a firewall that never
+// started looked identical to one you'd deliberately stopped - no error, no event
+// log entry, and no restart, because the SCM only retries on a *failure* exit.
+bool RunOneMode(const std::string& desired, Db& db, IdentityResolver& resolver,
+                DnsWatcher& dns, HabitTracker& habits) {
     if (desired == "idle") {
-        // Deliberately keep the service alive rather than exiting: it stays a
-        // stopped firewall the user can turn back on, and it's where the Phase-B2
-        // command listener will live. Enforcing nothing, holding no filters.
-        g_idleStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        // Deliberately stay alive rather than exiting: a stopped firewall the user
+        // can turn back on with one command, holding no filters and enforcing
+        // nothing. Exiting would mean nothing was left listening to turn it on.
+        ResetEvent(g_idleStop);
         SetMetaMode(db, "idle");
         SetState(SERVICE_RUNNING);
-        if (g_idleStop) {
-            WaitForSingleObject(g_idleStop, INFINITE);
-            CloseHandle(g_idleStop);
-            g_idleStop = nullptr;
-        }
-        return;
+        WaitForSingleObject(g_idleStop, INFINITE);
+        return true;
     }
 
     if (desired == "learning") {
@@ -125,9 +141,9 @@ void RunDesiredMode(Db& db, IdentityResolver& resolver, DnsWatcher& dns, HabitTr
         g_recorder = &recorder;
         SetMetaMode(db, "learning");
         SetState(SERVICE_RUNNING);
-        recorder.run();   // blocks: records every net event, enforces nothing
+        const bool ok = recorder.run();   // blocks: records every event, enforces nothing
         g_recorder = nullptr;
-        return;
+        return ok;
     }
 
     Enforcer enf;
@@ -135,8 +151,91 @@ void RunDesiredMode(Db& db, IdentityResolver& resolver, DnsWatcher& dns, HabitTr
     g_daemon = &daemon;
     SetMetaMode(db, "enforcing");
     SetState(SERVICE_RUNNING);
-    daemon.run(0);   // blocks: baseline + default-deny + rules + prompts, until stop()
+    const bool ok = daemon.run(0);   // blocks: baseline + default-deny + rules + prompts
     g_daemon = nullptr;
+    return ok;
+}
+
+// Run the desired mode, and keep running whatever it becomes. A MODE command sets
+// g_modeSwitch and stops the current mode, which lands us back here to pick up the
+// new one - so switching enforce->learn no longer means tearing down the service
+// (or, as it used to, spawning a rival ngd.exe alongside it).
+bool RunModeLoop(Db& db, IdentityResolver& resolver, DnsWatcher& dns, HabitTracker& habits) {
+    for (;;) {
+        g_modeSwitch = false;
+        if (!RunOneMode(db.meta("desired_mode", "enforcing"), db, resolver, dns, habits))
+            return false;   // setup failed: report it rather than silently spinning or idling
+        // Only a switch continues the loop; the SCM stopping us ends it.
+        if (g_svcStopping || !g_modeSwitch) return true;
+    }
+}
+
+// --- command channel (see core/cmd.h) ---------------------------------------
+
+std::string HandleCommand(Db& db, const std::string& req) {
+    const size_t sp = req.find(' ');
+    const std::string verb = req.substr(0, sp);
+    const std::string arg = (sp == std::string::npos) ? "" : req.substr(sp + 1);
+
+    if (verb == "STATUS")
+        return "OK mode=" + db.meta("mode", "idle") + " desired=" + db.meta("desired_mode", "enforcing");
+
+    if (verb == "MODE") {
+        if (arg != "enforcing" && arg != "learning" && arg != "idle")
+            return "ERR mode must be enforcing|learning|idle";
+        db.setMeta("desired_mode", arg);   // persist first: a switch that crashes still resumes right
+        if (db.meta("mode", "idle") == arg) return "OK already " + arg;
+        g_modeSwitch = true;
+        SignalCurrentModeStop();
+        return "OK switching to " + arg;
+    }
+
+    if (verb == "PANIC") {
+        // Panic means off and STAYS off - persisting idle is the difference between
+        // a panic and a five-second pause before the next boot re-enforces.
+        db.setMeta("desired_mode", "idle");
+        if (db.meta("mode", "idle") == "idle") return "OK already idle (no filters)";
+        g_modeSwitch = true;
+        SignalCurrentModeStop();   // the daemon reverts every filter as it returns
+        return "OK panic - filters reverted, going idle";
+    }
+
+    return "ERR unknown command: " + verb;
+}
+
+// One client at a time is plenty: these are human-scale commands, not a data path.
+void CommandServer(Db* db) {
+    while (!g_svcStopping) {
+        HANDLE pipe = CreateNamedPipeW(kCmdPipe, PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+            PIPE_UNLIMITED_INSTANCES, 4096, 4096, 0, nullptr);
+        if (pipe == INVALID_HANDLE_VALUE) { Sleep(1000); continue; }
+
+        const BOOL connected = ConnectNamedPipe(pipe, nullptr)
+                                   ? TRUE
+                                   : (GetLastError() == ERROR_PIPE_CONNECTED);
+        if (connected && !g_svcStopping) {
+            char buf[1024] = {};
+            DWORD n = 0;
+            if (ReadFile(pipe, buf, sizeof(buf) - 1, &n, nullptr) && n > 0) {
+                const std::string reply = HandleCommand(*db, std::string(buf, n));
+                DWORD wr = 0;
+                WriteFile(pipe, reply.data(), (DWORD)reply.size(), &wr, nullptr);
+                FlushFileBuffers(pipe);
+            }
+        }
+        DisconnectNamedPipe(pipe);
+        CloseHandle(pipe);
+    }
+}
+
+// ConnectNamedPipe blocks, so on shutdown the server thread is parked inside it.
+// Connecting to our own pipe unblocks it; it then sees g_svcStopping and returns,
+// which is what lets us join rather than detach a thread still using `db`.
+void WakeCommandServer() {
+    HANDLE h = CreateFileW(kCmdPipe, GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                           OPEN_EXISTING, 0, nullptr);
+    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
 }
 
 void WINAPI ServiceMain(DWORD, wchar_t**) {
@@ -152,11 +251,27 @@ void WINAPI ServiceMain(DWORD, wchar_t**) {
     dns.start();
     HabitTracker habits(db);
 
-    RunDesiredMode(db, resolver, dns, habits);
+    // Created once for the whole service lifetime: HandlerEx and the command
+    // server both signal it from other threads, so it must not be a handle that
+    // comes and goes with whichever mode happens to be running.
+    g_idleStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    std::thread cmdThread(CommandServer, &db);
+
+    const bool ok = RunModeLoop(db, resolver, dns, habits);
+
+    g_svcStopping = true;   // also covers RunModeLoop returning on its own
+    WakeCommandServer();
+    if (cmdThread.joinable()) cmdThread.join();   // joined, not detached: it holds &db
+    CloseHandle(g_idleStop);
+    g_idleStop = nullptr;
 
     dns.stop();
     SetMetaMode(db, "idle");
-    SetState(SERVICE_STOPPED);
+    // A failed start must exit non-zero, or the SCM treats it as a clean stop:
+    // no event logged, and the restart policy - which is what recovers a transient
+    // failure like the WFP provider still being held by a just-killed enforcer -
+    // never fires.
+    SetState(SERVICE_STOPPED, ok ? 0 : ERROR_SERVICE_SPECIFIC_ERROR);
 }
 
 }  // namespace
