@@ -39,6 +39,13 @@ void Recorder::handleEvent(const void* evOpaque) {
     Identity idn = app.empty() ? Identity{} : id_.resolve(app);
     std::string domain = remote.empty() ? "" : dns_.lookup(remote);
 
+    // Direction comes from the ALE layer the event was classified at (the layer
+    // IS the direction) - not a port-number guess. Unknown for non-ALE events
+    // (transport/capability/...), which are logged but never fold into a baseline.
+    ngwfp::Dir dir = ngwfp::DirectionOf(ev, aleConnV4_, aleConnV6_, aleAcceptV4_, aleAcceptV6_);
+    const char* dirStr = (dir == ngwfp::Dir::In) ? "in"
+                       : (dir == ngwfp::Dir::Out) ? "out" : nullptr;
+
     {
         std::lock_guard<std::mutex> lk(db_.mutex());
         sqlite3_stmt* ins = static_cast<sqlite3_stmt*>(insStmt_);
@@ -56,14 +63,13 @@ void Recorder::handleEvent(const void* evOpaque) {
         bindText(ins, 9, sid);
         if (idn.id >= 0) sqlite3_bind_int64(ins, 10, idn.id); else sqlite3_bind_null(ins, 10);
         if (domain.empty()) sqlite3_bind_null(ins, 11); else bindText(ins, 11, domain);
+        if (dirStr) sqlite3_bind_text(ins, 12, dirStr, -1, SQLITE_STATIC);
+        else        sqlite3_bind_null(ins, 12);
         if (sqlite3_step(ins) == SQLITE_DONE) ++count_;
     }
 
-    // Fold genuine connection establishments into the learned baseline. Direction
-    // comes from the ALE layer the event was classified at (the layer IS the
-    // direction) - not a port-number guess. Only ALE connect/accept events count;
-    // transport/capability/other events are Unknown and skipped.
-    ngwfp::Dir dir = ngwfp::DirectionOf(ev, aleConnV4_, aleConnV6_, aleAcceptV4_, aleAcceptV6_);
+    // Fold genuine connection establishments into the learned baseline. Only ALE
+    // connect/accept events count; Unknown is skipped.
     const bool isLoopback = remote.rfind("127.", 0) == 0 || remote == "::1" ||
                             local.rfind("127.", 0) == 0 || local == "::1";
     // Service port = remote for outbound (where it connects), local for inbound
@@ -76,9 +82,7 @@ void Recorder::handleEvent(const void* evOpaque) {
                                      : (domain.empty() ? remote : domain);
     const bool realRemote = inbound ? true
                                     : (!remote.empty() && remote != "0.0.0.0" && remote != "::");
-    if ((dir == ngwfp::Dir::Out || dir == ngwfp::Dir::In) &&
-        svcPort > 0 && idn.id >= 0 && !isLoopback && realRemote) {
-        const char* dirStr = inbound ? "in" : "out";
+    if (dirStr && svcPort > 0 && idn.id >= 0 && !isLoopback && realRemote) {
         SYSTEMTIME st{}; FileTimeToSystemTime(&h->timeStamp, &st);
         std::string token = std::string(dirStr) + "|" + local + "|" +
                             std::to_string(hasLPort ? h->localPort : 0) + "|" + remote + "|" +
@@ -97,8 +101,8 @@ bool Recorder::run() {
     sqlite3_stmt* ins = nullptr;
     if (sqlite3_prepare_v2(db_.handle(),
             "INSERT INTO flow_events"
-            "(ts_utc,verdict,protocol,local_addr,local_port,remote_addr,remote_port,image_path,user_sid,image_id,remote_domain)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?);",
+            "(ts_utc,verdict,protocol,local_addr,local_port,remote_addr,remote_port,image_path,user_sid,image_id,remote_domain,direction)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?);",
             -1, &ins, nullptr) != SQLITE_OK) {
         fprintf(stderr, "prepare insert failed: %s\n", sqlite3_errmsg(db_.handle()));
         return false;

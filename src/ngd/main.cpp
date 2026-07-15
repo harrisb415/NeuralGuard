@@ -124,6 +124,10 @@ void PrintUsage() {
         "  ngd features demote <app> <port> [proto] [db]  Distrust an (app,port) so it prompts (proto=6 TCP).\n"
         "  ngd features clear [db]       Clear ML flags (re-trust demoted apps).\n"
         "  ngd features purge [db] [days] Delete feature rows older than [days] (default 30).\n"
+        "  ngd inbound [on|off] [db]     Preview (no arg) or toggle INBOUND enforcement.\n"
+        "                                Off by default: inbound is always learned, but only\n"
+        "                                blocked once you turn it on. SSH/RDP/DHCP/loopback\n"
+        "                                stay exempt so you can't be locked out.\n"
         "  ngd update [check|apply]      Check GitHub for a newer release; 'apply' downloads\n"
         "                                the installer, verifies it, and launches it.\n"
         "  ngd -h | --help | /?          Show this help.\n\n"
@@ -812,6 +816,27 @@ int RunFeatures(int argc, char** argv) {
     return ok ? 0 : 1;
 }
 
+// `ngd inbound [on|off]` - preview / toggle inbound enforcement (Phase C2).
+// With no argument it PREVIEWS: shows the current mode plus the inbound services
+// that would be permitted, so you can look before you leap. Inbound accepts are
+// always learned (direction-aware); this only controls whether they're enforced.
+int RunInbound(ng::Db& db, const char* arg) {
+    if (arg && (strcmp(arg, "on") == 0 || strcmp(arg, "enforce") == 0)) {
+        MetaSet(db, "inbound_mode", "enforce");
+        printf("Inbound enforcement ENABLED (takes effect next time enforce starts).\n"
+               "SSH 22 / RDP 3389 / DHCP / loopback / link-local stay exempt.\n\n");
+    } else if (arg && (strcmp(arg, "off") == 0)) {
+        MetaSet(db, "inbound_mode", "off");
+        printf("Inbound enforcement DISABLED (outbound-only; inbound still learned).\n\n");
+    } else if (arg) {
+        fprintf(stderr, "usage: ngd inbound [on|off]   (no argument = preview)\n");
+        return 2;
+    }
+    printf("inbound_mode = %s\n\n", MetaGet(db, "inbound_mode", "off").c_str());
+    printf("--- inbound services that WOULD be permitted ---\n");
+    return ng::PrintInboundBaseline(db) < 0 ? 1 : 0;
+}
+
 // `ngd update [check|apply]` - self-update from the latest GitHub Release.
 // check (default) just reports; apply downloads + verifies + launches the
 // installer, then exits so the installer can replace the running files.
@@ -869,6 +894,27 @@ int main(int argc, char** argv) {
 
     // `update` needs no db and no admin (the installer elevates its own steps).
     if (argc >= 2 && strcmp(argv[1], "update") == 0) return RunUpdate(argc, argv);
+
+    // `inbound [on|off]` - preview/toggle inbound enforcement (read-only preview,
+    // no admin; the toggle just writes meta, enforce picks it up on next start).
+    if (argc >= 2 && strcmp(argv[1], "inbound") == 0) {
+        // `ngd inbound [on|off] [db]` - argv[2] is the mode only when it's
+        // literally on/off/enforce; anything else is the db path.
+        const char* arg = nullptr;
+        const char* dbp = "ngpolicy.db";
+        if (argc >= 3) {
+            if (strcmp(argv[2], "on") == 0 || strcmp(argv[2], "off") == 0 ||
+                strcmp(argv[2], "enforce") == 0) {
+                arg = argv[2];
+                if (argc >= 4) dbp = argv[3];
+            } else {
+                dbp = argv[2];
+            }
+        }
+        ng::Db db;
+        if (!db.open(dbp)) return 1;
+        return RunInbound(db, arg);
+    }
 
     // `baseline` prints the stable permits enforce would install (read-only, no
     // admin) - shows the effect of Phase 4d ML demotions without enforcing.

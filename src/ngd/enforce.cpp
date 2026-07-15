@@ -55,6 +55,21 @@ static const char* const kBaselineSQL =
     " GROUP BY pi.image_path, fe.protocol, fe.remote_port"
     " HAVING conns >= 3;";
 
+// The INBOUND counterpart: which (app, LOCAL service port) pairs have accepted
+// enough real inbound connections to be trusted as a listening service. Mirrors
+// kBaselineSQL but keys on local_port (the port being connected TO) and requires
+// direction='in' - which is a recorded WFP fact now (Phase A), not a port guess.
+// Rows predating the direction column are NULL and simply don't qualify, rather
+// than being mislabelled as inbound.
+static const char* const kInboundBaselineSQL =
+    "SELECT pi.image_path, fe.protocol, fe.local_port,"
+    " COUNT(DISTINCT fe.remote_addr || '|' || fe.remote_port) AS conns"
+    " FROM flow_events fe JOIN process_identity pi ON fe.image_id = pi.id"
+    " WHERE fe.direction = 'in' AND fe.local_port > 0 AND pi.image_path LIKE '_:\\%'"
+    "   AND fe.verdict IN ('ALLOW','CAPALLOW')"
+    " GROUP BY pi.image_path, fe.protocol, fe.local_port"
+    " HAVING conns >= 3;";
+
 }  // namespace
 
 int EnforceDaemon::installBaseline() {
@@ -68,6 +83,23 @@ int EnforceDaemon::installBaseline() {
         int port = sqlite3_column_int(s, 2);
         if (path && enf_.addPermitAppId(util::Widen(path).c_str(),
                                         (uint16_t)port, (uint8_t)proto))
+            ++permits;
+    }
+    sqlite3_finalize(s);
+    return permits;
+}
+
+int EnforceDaemon::installInboundBaseline() {
+    sqlite3* h = db_.handle();
+    sqlite3_stmt* s = nullptr;
+    sqlite3_prepare_v2(h, kInboundBaselineSQL, -1, &s, nullptr);
+    int permits = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        const char* path = (const char*)sqlite3_column_text(s, 0);
+        int proto = sqlite3_column_int(s, 1);
+        int localPort = sqlite3_column_int(s, 2);
+        if (path && enf_.addPermitAppIdInbound(util::Widen(path).c_str(),
+                                               (uint16_t)localPort, (uint8_t)proto))
             ++permits;
     }
     sqlite3_finalize(s);
@@ -102,6 +134,12 @@ void EnforceDaemon::recordEvent(const void* evp) {
     Identity idn = app.empty() ? Identity{} : id_.resolve(app);
     std::string domain = remote.empty() ? "" : dns_.lookup(remote);
 
+    // Same direction-from-layer attribution as Recorder::handleEvent (enforcement
+    // keeps learning the baseline). Direction from the ALE layer, not a port guess.
+    ngwfp::Dir dir = ngwfp::DirectionOf(ev, aleConnV4_, aleConnV6_, aleAcceptV4_, aleAcceptV6_);
+    const char* dirStr = (dir == ngwfp::Dir::In) ? "in"
+                       : (dir == ngwfp::Dir::Out) ? "out" : nullptr;
+
     {
         std::lock_guard<std::mutex> lk(db_.mutex());
         sqlite3_stmt* ins = static_cast<sqlite3_stmt*>(insStmt_);
@@ -119,12 +157,11 @@ void EnforceDaemon::recordEvent(const void* evp) {
         bindText(ins, 9, sid);
         if (idn.id >= 0) sqlite3_bind_int64(ins, 10, idn.id); else sqlite3_bind_null(ins, 10);
         if (domain.empty()) sqlite3_bind_null(ins, 11); else bindText(ins, 11, domain);
+        if (dirStr) sqlite3_bind_text(ins, 12, dirStr, -1, SQLITE_STATIC);
+        else        sqlite3_bind_null(ins, 12);
         sqlite3_step(ins);
     }
 
-    // Same direction-from-layer learning as Recorder::handleEvent (enforcement
-    // keeps learning the baseline). Direction from the ALE layer, not a port guess.
-    ngwfp::Dir dir = ngwfp::DirectionOf(ev, aleConnV4_, aleConnV6_, aleAcceptV4_, aleAcceptV6_);
     const bool isLoopback = remote.rfind("127.", 0) == 0 || remote == "::1" ||
                             local.rfind("127.", 0) == 0 || local == "::1";
     const bool inbound = (dir == ngwfp::Dir::In);
@@ -134,9 +171,7 @@ void EnforceDaemon::recordEvent(const void* evp) {
                                      : (domain.empty() ? remote : domain);
     const bool realRemote = inbound ? true
                                     : (!remote.empty() && remote != "0.0.0.0" && remote != "::");
-    if ((dir == ngwfp::Dir::Out || dir == ngwfp::Dir::In) &&
-        svcPort > 0 && idn.id >= 0 && !isLoopback && realRemote) {
-        const char* dirStr = inbound ? "in" : "out";
+    if (dirStr && svcPort > 0 && idn.id >= 0 && !isLoopback && realRemote) {
         SYSTEMTIME st{}; FileTimeToSystemTime(&h->timeStamp, &st);
         std::string token = std::string(dirStr) + "|" + local + "|" +
                             std::to_string(hasLPort ? h->localPort : 0) + "|" + remote + "|" +
@@ -251,6 +286,23 @@ int EnforceDaemon::readAutonomy() {
     return v;
 }
 
+// meta('inbound_mode'): 'off' (default) = outbound-only enforcement, inbound is
+// still learned but never blocked; 'enforce' = also install the inbound baseline
+// + inbound default-deny. Opt-in so an upgrade can never silently start blocking
+// inbound on someone's listening services.
+std::string EnforceDaemon::readInboundMode() {
+    std::lock_guard<std::mutex> lk(db_.mutex());
+    sqlite3_stmt* s = nullptr;
+    std::string v = "off";
+    sqlite3_prepare_v2(db_.handle(), "SELECT v FROM meta WHERE k='inbound_mode';", -1, &s, nullptr);
+    if (sqlite3_step(s) == SQLITE_ROW) {
+        const char* t = (const char*)sqlite3_column_text(s, 0);
+        if (t && *t) v = t;
+    }
+    sqlite3_finalize(s);
+    return v;
+}
+
 bool EnforceDaemon::appKnown(const std::string& key) {
     if (key.empty()) return false;
     std::lock_guard<std::mutex> lk(db_.mutex());
@@ -334,8 +386,8 @@ bool EnforceDaemon::run(int seconds) {
     sqlite3_stmt* ins = nullptr;
     if (sqlite3_prepare_v2(db_.handle(),
             "INSERT INTO flow_events"
-            "(ts_utc,verdict,protocol,local_addr,local_port,remote_addr,remote_port,image_path,user_sid,image_id,remote_domain)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?);", -1, &ins, nullptr) != SQLITE_OK) {
+            "(ts_utc,verdict,protocol,local_addr,local_port,remote_addr,remote_port,image_path,user_sid,image_id,remote_domain,direction)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?);", -1, &ins, nullptr) != SQLITE_OK) {
         fprintf(stderr, "enforce: prepare insert failed: %s\n", sqlite3_errmsg(db_.handle()));
         enf_.panic(); return false;
     }
@@ -343,6 +395,20 @@ bool EnforceDaemon::run(int seconds) {
 
     int permits = installBaseline();
     if (!enf_.enableDefaultDeny()) { enf_.panic(); return false; }
+
+    // Inbound is OPT-IN (meta('inbound_mode'), default 'off'): outbound-only
+    // enforcement stays the behavior unless the user has looked at
+    // `ngd inbound` and explicitly turned it on. Install the stable inbound
+    // service permits BEFORE the inbound catch-all so learned services survive;
+    // the anti-lockout Tier-0 (SSH/RDP/DHCP/loopback) is inside
+    // enableInboundDefaultDeny and always wins.
+    if (readInboundMode() == "enforce") {
+        int inPermits = installInboundBaseline();
+        if (!enf_.enableInboundDefaultDeny()) { enf_.panic(); return false; }
+        printf("ngd enforce: inbound default-deny active (%d inbound service permit(s); "
+               "SSH/RDP/DHCP/loopback exempt).\n", inPermits);
+    }
+
     printf("ngd enforce: %d stable permits + default-deny active.%s\n", permits,
            seconds > 0 ? " (timed)" : " Ctrl+C to revert.");
     fflush(stdout);
@@ -430,6 +496,31 @@ int PrintBaseline(Db& db) {
     }
     sqlite3_finalize(s);
     printf("\n%d stable permit(s) would be installed (Phase 4d demotions excluded).\n", n);
+    return n;
+}
+
+int PrintInboundBaseline(Db& db) {
+    sqlite3_stmt* s = nullptr;
+    if (sqlite3_prepare_v2(db.handle(), kInboundBaselineSQL, -1, &s, nullptr) != SQLITE_OK) {
+        fprintf(stderr, "inbound baseline query failed: %s\n", sqlite3_errmsg(db.handle()));
+        return -1;
+    }
+    printf("  %-5s %6s %6s  %s\n", "proto", "port", "conns", "app (listening service)");
+    int n = 0;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        const char* path = (const char*)sqlite3_column_text(s, 0);
+        printf("  %-5d %6d %6d  %s\n", sqlite3_column_int(s, 1), sqlite3_column_int(s, 2),
+               sqlite3_column_int(s, 3), path ? path : "");
+        ++n;
+    }
+    sqlite3_finalize(s);
+    printf("\n%d inbound service(s) would be permitted; every other NEW inbound\n"
+           "connection would be blocked (SSH 22 / RDP 3389 / DHCP / loopback /\n"
+           "link-local are always exempt, so you can't be locked out).\n", n);
+    if (n == 0)
+        printf("\nNOTE: nothing qualifies yet. Inbound accepts only started being\n"
+               "recorded with a direction once this build was installed - let it run\n"
+               "and re-check before turning inbound enforcement on.\n");
     return n;
 }
 

@@ -235,11 +235,31 @@ territory — not claimed here without the driver.
   connection (port 22 exempt) worked throughout — **the anti-lockout holds, you
   can't get locked out.** (Testing gotcha: overlapping manual enforcers share the
   provider GUID, so one instance's panic clears them all — run one at a time.)
-- ⬜ **Remaining (C2):** wire inbound into the always-on daemon (`ngd enforce`
-  installs inbound baseline permits from the Phase-A inbound habits + inbound
-  default-deny), behind a **shadow/log-only mode first** (record what inbound-deny
-  *would* block before it blocks). Inbound prompt UX is a design call (auto-permit-
-  known + log vs. prompt-per-conn; a listening server makes per-conn prompts noisy).
+- ✅ **C2 — daemon integration, opt-in.** `meta('inbound_mode')` = `off`
+  (DEFAULT) | `enforce`. Off = outbound-only enforcement exactly as before, but
+  inbound is still *learned*; `enforce` = `ngd enforce` also installs the stable
+  inbound baseline permits + inbound default-deny. Opt-in by design so an upgrade
+  can never silently start blocking someone's listening services.
+  - `flow_events` gained a **`direction`** column (populated from the ALE layer,
+    like habits). The inbound baseline needs it — local/remote ports alone can't
+    tell an inbound accept from an outbound connect (exactly what the old port
+    heuristic was guessing). Old rows stay NULL → they never qualify, rather than
+    being mislabelled inbound.
+  - `kInboundBaselineSQL` mirrors `kBaselineSQL` but keys on `local_port` +
+    `direction='in'`. (Habits couldn't be used: they key on `process_key`, and a
+    signer thumbprint maps to hundreds of binaries — far too broad to permit.)
+  - **`ngd inbound [on|off] [db]`** — no arg = *preview*: shows the mode and the
+    exact inbound services that would be permitted. This is the "look before you
+    leap" step that replaces a separate shadow mode: inbound is always being
+    recorded, so you just watch the preview until it covers your real services,
+    then turn it on.
+  - VM-verified: preview correctly listed `sshd.exe :22/TCP (8 conns)`; with
+    `inbound on` the daemon logged *"inbound default-deny active (1 inbound
+    service permit(s))"* and filter count hit **37** (19 outbound + 2 outbound
+    baseline + 14 inbound Tier-0/catch-all + 2 inbound baseline); SSH alive
+    throughout; clean revert to 0. Real DB confirmed `inbound_mode=off`.
+- ⬜ Inbound prompt UX is still a design call (auto-permit-known + log vs.
+  prompt-per-conn; a listening server makes per-conn prompts noisy).
 
 ### Phase D — Transport-layer ICMP coverage + docs.
 - Add `OUTBOUND/INBOUND_TRANSPORT_V4/V6` filters so ICMP/ICMPv6 isn't a silent gap

@@ -28,6 +28,12 @@ struct Identity;
 // `ngd baseline` to see the effect of ML demotions without enforcing.
 int PrintBaseline(Db& db);
 
+// Read-only inspector for the INBOUND baseline: prints the (app, local service
+// port) pairs that `ngd enforce` would permit to accept inbound connections when
+// meta('inbound_mode')='enforce'. This is the "look before you leap" step - watch
+// it until it covers your real listening services, THEN enable inbound.
+int PrintInboundBaseline(Db& db);
+
 class EnforceDaemon {
 public:
     EnforceDaemon(Db& db, IdentityResolver& id, DnsWatcher& dns, Enforcer& enf,
@@ -42,10 +48,12 @@ public:
 
 private:
     int  installBaseline();  // permit stable (app, port) pairs; returns count
+    int  installInboundBaseline();  // permit stable (app, local port) inbound services
     int  applyRules();       // apply enabled, unexpired rows from the rules table
     void reapply();          // clear + reinstall baseline + default-deny + rules (live edit)
     long long readRulesGen();// meta('rules_gen'), bumped by the dashboard on edit
     int  readAutonomy();     // meta('autonomy'): 0 prompt, 1 auto-allow known, 2 auto-allow all
+    std::string readInboundMode();  // meta('inbound_mode'): 'off' (default) | 'enforce'
     bool appKnown(const std::string& key);  // app already has a learned habit
     void recordEvent(const void* ev);  // persist to flow_events + update habits (live feed)
     void recordFeedback(const Identity& idn, const std::string& dest, int port,

@@ -30,7 +30,9 @@ const char* kSchema =
     "  image_path    TEXT,"  // raw device path (kept for continuity)
     "  user_sid      TEXT,"
     "  image_id      INTEGER,"
-    "  remote_domain TEXT);"  // resolved via DNS-client ETW, NULL if unknown
+    "  remote_domain TEXT,"  // resolved via DNS-client ETW, NULL if unknown
+    "  direction     TEXT);" // 'out' (ALE connect) | 'in' (ALE recv-accept) | NULL
+                             // (non-ALE event). From the event's layer, not a guess.
     // The learned baseline: one row per (process, destination, port, protocol)
     // with a decaying count and time-of-day histograms.
     "CREATE TABLE IF NOT EXISTS habits("
@@ -66,6 +68,13 @@ const char* kSchema =
     // Autonomy: 0 = prompt on every novel connection, 1 = auto-allow when the
     // app is already known (has a learned habit), 2 = auto-allow everything.
     "INSERT OR IGNORE INTO meta(k,v) VALUES('autonomy','0');"
+    // Inbound enforcement: 'off' (default) = enforce outbound only, exactly as
+    // before - inbound accepts are still LEARNED (direction-aware habits), just
+    // never blocked. 'enforce' = also install the stable inbound baseline permits
+    // + inbound default-deny at RECV_ACCEPT. Opt-in by design: watch
+    // `ngd inbound` preview until the inbound baseline covers your real services,
+    // THEN turn it on, so enabling it can't blindside a listening service.
+    "INSERT OR IGNORE INTO meta(k,v) VALUES('inbound_mode','off');"
     // Phase 4 data foundation: one row per COMPLETED TCP flow - the metadata
     // feature vector the ML tier scores (asynchronously, off the decision
     // path). Populated by `ngd features` from GetTcpTable2 + per-connection
@@ -157,6 +166,13 @@ bool Db::open(const char* path) {
     // On an old DB the UNIQUE constraint stays keyed without direction, but
     // inbound rows use dest='' while outbound never does, so they can't collide.
     sqlite3_exec(db_, "ALTER TABLE habits ADD COLUMN direction TEXT DEFAULT 'out';",
+                 nullptr, nullptr, nullptr);
+    // Direction on raw events too - the inbound baseline needs to tell an inbound
+    // accept from an outbound connect, which the local/remote ports alone can't
+    // (that ambiguity is exactly what the old port heuristic was guessing at).
+    // Left NULL on old rows: they predate direction, so they're simply not
+    // eligible for the inbound baseline rather than being mislabelled.
+    sqlite3_exec(db_, "ALTER TABLE flow_events ADD COLUMN direction TEXT;",
                  nullptr, nullptr, nullptr);
     return true;
 }
