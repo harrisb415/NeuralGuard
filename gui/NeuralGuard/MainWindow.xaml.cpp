@@ -8,6 +8,8 @@
 #include "Row.h"
 #include "ColWidths.h"
 #include "core/updater.h"              // shared in-app updater (compiled from src/core)
+#include "core/cmd.h"                  // command pipe to the running service
+#include "Tray.h"                      // the tray icon, formerly ngtray.exe
 
 #include <microsoft.ui.xaml.window.h>   // IWindowNative -> HWND for the file dialogs
 
@@ -82,6 +84,8 @@ namespace winrt::NeuralGuard::implementation
         }
 
         colW_ = Application::Current().Resources().Lookup(box_value(L"ColW")).as<NeuralGuard::ColWidths>();
+
+        StartTray();
 
         timer_ = DispatcherTimer{};
         timer_.Interval(std::chrono::seconds(1));
@@ -276,6 +280,64 @@ namespace winrt::NeuralGuard::implementation
             if (!m.empty()) mode = m;
         }
         ModeText().Text(to_hstring(mode));
+        ngtray::SetMode(mode);   // one poller drives both the status bar and the tray icon
+    }
+
+    // Own the tray icon in this process. It used to be a whole separate executable
+    // (ngtray.exe) purely because a LocalSystem service can't show UI - but that
+    // never meant the frontend had to be two programs. Two of them meant two mode
+    // pollers, two panic paths that drifted, and a tray whose Status could only
+    // shell out to a cmd.exe window, having no UI of its own to render into.
+    void MainWindow::StartTray()
+    {
+        ngtray::Callbacks cb;
+        cb.openDashboard = [this] { ShowFromTray(); };
+        cb.quit = [this] { ExitApp(); };
+
+        // Status and Panic now render in-app instead of spawning a console.
+        cb.showStatus = [this] {
+            bool ok = false;
+            const std::string reply = ng::CmdSend("STATUS", &ok);
+            ShowFromTray();
+            Notify(ok ? U8(reply) : hstring{ L"Service not reachable (not installed or not running)." },
+                   ok ? InfoBarSeverity::Informational : InfoBarSeverity::Warning);
+        };
+        cb.panic = [this] { OnPanic(nullptr, nullptr); };
+
+        // Runs on the pipe thread, so it must not touch XAML. MessageBoxW is
+        // thread-safe and is what the block-notify-retry flow has always used.
+        cb.prompt = [](std::wstring const& app, std::wstring const& dest, std::wstring const& port) -> char {
+            std::wstring text = app + L"\n\nwants to connect to  " + dest + L":" + port +
+                L"\n\nYes = Always allow this app on this port"
+                L"\nNo = Allow once"
+                L"\nCancel = Block";
+            int r = MessageBoxW(nullptr, text.c_str(), L"NeuralGuard",
+                                MB_YESNOCANCEL | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND);
+            return (r == IDYES) ? 'A' : (r == IDNO) ? 'O' : 'B';
+        };
+
+        ngtray::Start(GetModuleHandleW(nullptr), cb);
+
+        // Closing the window hides to tray. The tray icon is the app's real
+        // lifetime now: an installed service with no frontend running would leave
+        // nothing to answer ngd's prompts or show you what it's doing.
+        AppWindow().Closing([this](auto&&, Microsoft::UI::Windowing::AppWindowClosingEventArgs const& args) {
+            args.Cancel(true);
+            AppWindow().Hide();
+        });
+    }
+
+    void MainWindow::ShowFromTray()
+    {
+        AppWindow().Show();
+        HWND h = WindowHandle();
+        if (h) { ShowWindow(h, SW_RESTORE); SetForegroundWindow(h); }
+    }
+
+    void MainWindow::ExitApp()
+    {
+        ngtray::Stop();          // pull the icon before the process goes, or it ghosts
+        Application::Current().Exit();
     }
 
     void MainWindow::RefreshCurrent()
@@ -1259,24 +1321,60 @@ namespace winrt::NeuralGuard::implementation
         Notify((block ? L"Blocked " : L"Allowed ") + what + L" (applies live).", InfoBarSeverity::Success);
     }
 
+    // Ask the running service to change mode. It's already up and already
+    // elevated, so this needs no UAC and no new process - where these buttons used
+    // to launch a whole second ngd.exe that knew nothing about the installed
+    // service and fought it for the same WFP provider. If no service is installed
+    // we fall back to the old foreground worker, so a service-less setup still
+    // works exactly as before.
+    bool MainWindow::SetMode(const char* mode, hstring const& okMsg)
+    {
+        bool ok = false;
+        const std::string reply = ng::CmdSend(std::string("MODE ") + mode, &ok);
+        if (ok)
+        {
+            const bool good = reply.rfind("OK", 0) == 0;
+            Notify(good ? okMsg : U8(reply), good ? InfoBarSeverity::Success : InfoBarSeverity::Error);
+            UpdateMode();
+            return good;
+        }
+        return false;   // service not reachable; caller decides on a fallback
+    }
+
     void MainWindow::OnEnforce(IInspectable const&, RoutedEventArgs const&)
     {
+        if (SetMode("enforcing", L"Enforcing (default-deny + prompts).")) return;
         if (RunTool(L"ngd.exe", L"enforce \"" + NgDir() + L"\\ngpolicy.db\" 0"))
-            Notify(L"Enforce started (default-deny + prompts).", InfoBarSeverity::Success);
+            Notify(L"Enforce started (no service installed - running in the foreground).",
+                   InfoBarSeverity::Success);
     }
     void MainWindow::OnLearn(IInspectable const&, RoutedEventArgs const&)
     {
+        if (SetMode("learning", L"Learning (recording baseline, enforcing nothing).")) return;
         if (RunTool(L"ngd.exe", L"record \"" + NgDir() + L"\\ngpolicy.db\""))
-            Notify(L"Learn started (recording baseline).", InfoBarSeverity::Success);
+            Notify(L"Learn started (no service installed - running in the foreground).",
+                   InfoBarSeverity::Success);
     }
     void MainWindow::OnStop(IInspectable const&, RoutedEventArgs const&)
     {
-        StopDaemons();
-        if (RunTool(L"ngctl.exe", L"panic"))
-            Notify(L"Stopping NeuralGuard; filters removed (failing open).", InfoBarSeverity::Informational);
+        if (SetMode("idle", L"Stopped; filters removed (failing open). Stays off across reboots."))
+            return;
+        StopDaemons();   // no service: kill the foreground worker instead
+        Notify(L"Stopping NeuralGuard (failing open).", InfoBarSeverity::Informational);
     }
     void MainWindow::OnPanic(IInspectable const&, RoutedEventArgs const&)
     {
+        // Prefer the service's own panic: a local one only rips the filters out
+        // from under a daemon that keeps running and still thinks it's enforcing.
+        bool ok = false;
+        const std::string reply = ng::CmdSend("PANIC", &ok);
+        if (ok)
+        {
+            Notify(L"PANIC - filters removed, enforcement off (and stays off).",
+                   InfoBarSeverity::Warning);
+            UpdateMode();
+            return;
+        }
         StopDaemons();
         if (RunTool(L"ngctl.exe", L"panic"))
             Notify(L"PANIC - all NeuralGuard filters removed.", InfoBarSeverity::Warning);

@@ -15,7 +15,7 @@ if ($cmakeText -notmatch 'project\(NeuralGuard\s+VERSION\s+([\d.]+)') {
 $version = $Matches[1]
 Write-Host "NeuralGuard version: $version" -ForegroundColor Cyan
 
-# --- 1. build the engine (ngmon/ngd/ngctl/ngtray) -----------------------------
+# --- 1. build the engine (ngmon/ngd/ngctl) ------------------------------------
 Write-Host "`n== Building engine ==" -ForegroundColor Cyan
 & (Join-Path $PSScriptRoot "build.ps1") @(if ($Clean) { "-Clean" })
 if ($LASTEXITCODE -ne 0) { throw "engine build failed" }
@@ -39,7 +39,8 @@ Write-Host "`n== Staging ==" -ForegroundColor Cyan
 if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory -Force -Path "$stage\dashboard" | Out-Null
 
-foreach ($exe in "ngmon.exe", "ngd.exe", "ngctl.exe", "ngtray.exe") {
+# ngtray.exe is retired - the dashboard owns the tray icon now (gui/.../Tray.cpp).
+foreach ($exe in "ngmon.exe", "ngd.exe", "ngctl.exe") {
     Copy-Item (Join-Path $engineOut $exe) $stage
 }
 # onnxruntime.dll: ngd loads it at runtime for Phase-4b shadow scoring (optional -

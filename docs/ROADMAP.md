@@ -468,22 +468,43 @@ service is protection before/without a login. TinyWall's shape is the target.
 - This closes the structural half of bug 1 (no learning mode, no persistence) and
   the three-independent-WFP-owners problem in the same pass.
 
-### Phase C — Merge `ngtray` into the WinUI dashboard ⬜ NOT STARTED
-- One frontend process (`NeuralGuard.exe`): owns the tray icon itself (`Shell_NotifyIcon`
-  interop from the WinUI app, or `Microsoft.Windows.AppNotifications` for the
-  balloon-equivalent), minimizes-to-tray instead of closing, and is the only thing
-  launched at login.
-- Right-click menu (Dashboard / Status / Panic / Quit) sends the Phase B pipe verbs
-  and renders the result in-app (an InfoBar) — retires the `cmd.exe /k ngctl status`
-  window entirely.
-- `ngtray.exe` is retired as a shipped binary; its Win32 tray/menu code folds into
-  the WinUI app.
+### Phase C — Merge `ngtray` into the WinUI dashboard ✅ DONE
+- ✅ **One frontend process.** `gui/NeuralGuard/Tray.cpp` owns the icon, the menu,
+  the balloons and the prompt pipe (`\\.\pipe\neuralguard`) — all lifted from
+  ngtray. The message-only window is created on the **WinUI UI thread** (which
+  already pumps messages), so menu clicks land there and can touch XAML with no
+  marshalling; the prompt pipe keeps its own thread, since it blocks on a client
+  and a blocked UI thread is a dead app.
+- ✅ **Status and Panic render in-app** (InfoBar) via the B2 command pipe — the
+  `cmd.exe /k ngctl status` window is gone. Closing the window hides to tray
+  (`AppWindow().Closing` → `Cancel(true)` + `Hide()`); `--tray` starts it as an icon
+  with no window; Quit really exits.
+- ✅ **Enforce/Learn/Stop/Panic now command the service** instead of spawning a
+  rival `ngd.exe` that fought it for the same WFP provider. Falls back to the old
+  foreground worker only when no service is reachable, so a service-less setup still
+  works. `requireAdministrator` moved from ngtray's manifest to the dashboard's —
+  it used to inherit ngtray's token, and the command pipe only admits Administrators.
+- ✅ **`ngtray.exe` retired** from CMake, `package.ps1` and the installer.
+- **VM-verified:** dashboard launches clean (`MainWindow made → Mica set →
+  Activated`, tray started in the ctor before Activate); **both** pipes served —
+  `neuralguard` by the *dashboard* (ngtray not running) and `neuralguard-cmd` by
+  the service; `ngctl notify` blocked waiting on a real prompt dialog, proving the
+  block-notify-retry path survived the move; `requireAdministrator` confirmed in the
+  embedded manifest. *(The icon's appearance itself needs a human eye on the VM
+  console — I can't see the GUI over SSH.)*
 
-### Phase D — Installer catches up ⬜ NOT STARTED
-- Single Start Menu / Desktop shortcut → the merged `NeuralGuard.exe`.
-- The "start the tray at login" task becomes checked by default (it's now the only
-  way to see or control an installed service) rather than opt-in and unchecked.
-- `[Files]`/`[Icons]` drop `ngtray.exe`; `UninstallDisplayIcon` points at the merged exe.
+### Phase D — Installer catches up ✅ DONE
+- ✅ Single Start Menu entry → `dashboard\NeuralGuard.exe`; `UninstallDisplayIcon`
+  likewise. `[Files]` no longer ships `ngtray.exe`; `[Run]` launches the dashboard
+  (keeping `shellexec`, since a manifested-admin target can't be CreateProcess'd).
+- ✅ **"Start at login" is now checked by default.** Leaving it opt-in meant you
+  could install a background firewall and get no icon, no prompts, and no way to
+  stop it without a command line — which is exactly what happened on the physical
+  host. The startup shortcut passes `--tray`.
+- ✅ **`[InstallDelete]`** removes a ≤1.4.0 `ngtray.exe` and its startup shortcut on
+  upgrade, or a stale tray would keep starting at login and fight the dashboard for
+  the icon and the prompt pipe.
+- Verified: `ISCC` compiles the script with ngtray absent from the staged layout.
 
 **Non-goal:** one process total. Session-0 isolation means a LocalSystem service can
 never own UI in the interactive desktop session — two processes (backend service +

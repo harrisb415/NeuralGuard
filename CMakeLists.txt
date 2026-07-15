@@ -75,18 +75,12 @@ target_compile_definitions(ngctl PRIVATE ${NG_DEFS})
 target_compile_options(ngctl PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
 target_link_libraries(ngctl PRIVATE ngcore ws2_32)
 
-# --- ngtray (Phase 2c): system-tray UI; launches the WinUI dashboard --------
-# The old native Win32 dashboard was replaced by the WinUI 3 app under gui/;
-# the tray now just shells out to that dashboard\NeuralGuard.exe.
-add_executable(ngtray WIN32 src/ngtray/main.cpp src/ngtray/ngtray.rc)
-target_include_directories(ngtray PRIVATE src)
-target_compile_definitions(ngtray PRIVATE ${NG_DEFS})
-target_compile_options(ngtray PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/W4>)
-# ngcore (ng::Db) so the tray can read meta('mode') to drive the live tray-state
-# icon, and reset it after Panic - see UpdateTrayIcon()/StopAndPanic() in main.cpp.
-target_link_libraries(ngtray PRIVATE ngcore user32 shell32)
-# Run the tray elevated: one UAC at launch, then its buttons (and the
-# dashboard it launches, which inherits the token) need none.
-if(MSVC)
-  target_link_options(ngtray PRIVATE "/MANIFESTUAC:level='requireAdministrator'")
-endif()
+# --- ngtray: RETIRED ---------------------------------------------------------
+# The tray was a separate process only because a LocalSystem service can't show UI
+# (session-0 isolation) - but that never meant the FRONTEND had to be two programs.
+# Two of them meant two mode pollers, two panic paths that drifted apart, and a
+# tray whose "Status" could only shell out to a cmd.exe window, having no UI of its
+# own to render into. The WinUI dashboard now owns the icon, the menu, and the
+# prompt pipe (gui/NeuralGuard/Tray.cpp), and talks to the service over the command
+# pipe instead of spawning a rival engine. src/ngtray/ is kept in the tree for
+# history but is no longer built or shipped.

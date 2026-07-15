@@ -169,15 +169,24 @@
       <CompileAs>CompileAsC</CompileAs>
       <PreprocessorDefinitions>SQLITE_ENABLE_MATH_FUNCTIONS;SQLITE_THREADSAFE=1;SQLITE_OMIT_LOAD_EXTENSION;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
+    <!-- The tray icon + prompt pipe, which used to be the separate ngtray.exe. -->
+    <ClCompile Include="Tray.cpp" />
     <!-- Shared in-app updater, compiled straight from src/core (no PCH, like sqlite). -->
     <ClCompile Include="..\..\src\core\updater.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <!-- Command-pipe client: how the frontend talks to the running service instead
+         of spawning a rival copy of the engine. Same no-PCH treatment. -->
+    <ClCompile Include="..\..\src\core\cmd.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\src\core\updater.h" />
+    <ClInclude Include="..\..\src\core\cmd.h" />
     <ClInclude Include="..\..\src\core\version.h" />
     <ClInclude Include="deps\sqlite3.h" />
+    <ClInclude Include="Tray.h" />
     <ClInclude Include="Db.h" />
     <ClInclude Include="Row.h" />
     <ClInclude Include="ColWidths.h" />

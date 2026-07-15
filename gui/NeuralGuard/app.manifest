@@ -11,6 +11,20 @@
     </application>
   </compatibility>
   
+  <!-- Elevate once at launch, so nothing the user clicks afterwards prompts.
+       This moved here from ngtray.exe, which carried it and passed its token down
+       to the dashboard it launched; now that the dashboard IS the tray and talks
+       to the service itself, it needs the token in its own right. The command
+       pipe only accepts Administrators (see core/cmd.h), so without this every
+       mode change would be refused. -->
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
   <application xmlns="urn:schemas-microsoft-com:asm.v3">
     <windowsSettings>
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>

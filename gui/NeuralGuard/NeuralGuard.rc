@@ -1,4 +1,12 @@
 // Embeds the app icon as the exe's resource icon (resource id 1, conventionally
 // the first icon = the one Explorer/taskbar/Alt-Tab show), so NeuralGuard.exe
 // carries the shield mark instead of the generic WinUI app icon.
-1 ICON "NeuralGuard.ico"
+//
+// 10-13 are the four live tray-state glyphs, loaded by id and swapped at runtime
+// as meta('mode') changes - see Tray.cpp's SetMode(). They moved here from
+// ngtray.rc when the tray stopped being a separate process.
+1  ICON "NeuralGuard.ico"
+10 ICON "..\\..\\assets\\icons\\tray-learning.ico"
+11 ICON "..\\..\\assets\\icons\\tray-enforcing.ico"
+12 ICON "..\\..\\assets\\icons\\tray-panic.ico"
+13 ICON "..\\..\\assets\\icons\\tray-offline.ico"

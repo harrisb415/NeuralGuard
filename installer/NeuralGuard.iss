@@ -48,37 +48,47 @@ WizardStyle=modern
 ; update over a running dashboard can overwrite locked binaries/DLLs.
 CloseApplications=yes
 RestartApplications=no
-UninstallDisplayIcon={app}\ngtray.exe
+UninstallDisplayIcon={app}\dashboard\NeuralGuard.exe
 UninstallDisplayName=NeuralGuard {#AppVersion}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "startup"; Description: "Start the NeuralGuard tray icon when I log in"; Flags: unchecked
+; Checked by default. The tray is the ONLY way to see or control an installed
+; service - and it's what answers ngd's "allow this connection?" prompts. Leaving
+; it opt-in meant you could install a background firewall and get no icon, no
+; prompts, and no way to stop it without a command line. That is what happened.
+Name: "startup"; Description: "Start NeuralGuard when I log in (tray icon)"
 
 [Files]
+; ngtray.exe is gone - the dashboard owns the tray icon now (see gui/.../Tray.cpp).
 Source: "{#SourceDir}\ngmon.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ngd.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\ngctl.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#SourceDir}\ngtray.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\onnxruntime.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#SourceDir}\dashboard\*"; DestDir: "{app}\dashboard"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[InstallDelete]
+; Upgrading from <=1.4.0: remove the retired tray binary and its shortcuts, or a
+; stale ngtray.exe keeps starting at login and fights the dashboard for the icon
+; and the prompt pipe.
+Type: files; Name: "{app}\ngtray.exe"
+Type: files; Name: "{userstartup}\NeuralGuard.lnk"
+
 [Icons]
-Name: "{group}\NeuralGuard"; Filename: "{app}\ngtray.exe"
+; One entry, one frontend. --tray starts it as just an icon, no window.
+Name: "{group}\NeuralGuard"; Filename: "{app}\dashboard\NeuralGuard.exe"
 Name: "{group}\Uninstall NeuralGuard"; Filename: "{uninstallexe}"
-Name: "{userstartup}\NeuralGuard"; Filename: "{app}\ngtray.exe"; Tasks: startup
+Name: "{userstartup}\NeuralGuard"; Filename: "{app}\dashboard\NeuralGuard.exe"; Parameters: "--tray"; Tasks: startup
 
 [Run]
-; ngtray.exe's manifest requires Administrator. [Run] entries launch via
-; CreateProcess by default, which can't elevate a manifested-admin target
-; (fails with "CreateProcess failed; code 740" - ERROR_ELEVATION_REQUIRED).
-; shellexec routes it through ShellExecute instead, which Windows elevates
-; with a normal UAC prompt - the same path Start Menu/desktop shortcuts
-; already use (shortcut activation is always shell-based, so those work
-; without this flag).
-Filename: "{app}\ngtray.exe"; Description: "Launch NeuralGuard now"; Flags: nowait postinstall skipifsilent shellexec
+; The dashboard's manifest requires Administrator (it commands the service over a
+; pipe that only admits Administrators). [Run] launches via CreateProcess by
+; default, which can't elevate a manifested-admin target ("CreateProcess failed;
+; code 740" = ERROR_ELEVATION_REQUIRED). shellexec routes it through ShellExecute,
+; which Windows elevates normally - the same path Start Menu shortcuts already use.
+Filename: "{app}\dashboard\NeuralGuard.exe"; Description: "Launch NeuralGuard now"; Flags: nowait postinstall skipifsilent shellexec
 
 [Code]
 // Stop a previous install before touching its files. The background service must

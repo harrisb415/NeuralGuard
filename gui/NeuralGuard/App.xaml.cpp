@@ -57,6 +57,16 @@ namespace winrt::NeuralGuard::implementation
             catch (...) { Mark("Mica unavailable"); }
             window.Activate();
             Mark("Activated");
+
+            // `--tray` = started at login: come up as just a tray icon, no window.
+            // Activate() has to run first (it's what realises the window and gets
+            // the tray icon registered), so this hides it immediately after rather
+            // than never showing it. Closing the window later hides it the same way.
+            if (wcsstr(GetCommandLineW(), L"--tray"))
+            {
+                window.AppWindow().Hide();
+                Mark("Hidden to tray");
+            }
         }
         catch (winrt::hresult_error const& ex)
         {

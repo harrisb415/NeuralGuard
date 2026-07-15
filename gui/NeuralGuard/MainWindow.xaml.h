@@ -43,6 +43,15 @@ namespace winrt::NeuralGuard::implementation
         void OnCheckUpdate(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnInstallUpdate(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
 
+        // The tray icon lives in this process now (see Tray.h). Closing the window
+        // hides to tray rather than exiting - the tray is the app's real lifetime.
+        void StartTray();
+        void ShowFromTray();
+        void ExitApp();
+        // Ask the running service to switch mode. False = service not reachable,
+        // so the caller can fall back to a foreground worker.
+        bool SetMode(const char* mode, winrt::hstring const& okMsg);
+
     private:
         void DemoteApp(winrt::hstring const& appPath, int port, int proto);   // Phase 4d: manual distrust
         void RetrustApp(winrt::hstring const& appPath, int port, int proto);  // remove a demote flag
