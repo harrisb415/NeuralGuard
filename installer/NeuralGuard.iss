@@ -213,12 +213,34 @@ begin
     SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
+// StopNeuralGuard (ssInstall) stops the service via the SCM so its files can be
+// replaced - deliberately WITHOUT --off, so meta('desired_mode') (enforcing /
+// learning / idle) survives untouched. But stopping a service doesn't restart
+// it: SERVICE_AUTO_START only means "at boot," not "bring yourself back after
+// being manually stopped." Left alone, an upgrade would leave protection OFF
+// until the next reboot - which looks exactly like "my setting got reverted to
+// idle," even though desired_mode was preserved correctly the whole time; it
+// just never got a chance to take effect again. Best-effort and unconditional:
+// a fresh install has no service registered yet, so this harmlessly fails and
+// is ignored, same as the schtasks /delete on uninstall.
+procedure RestartServiceIfInstalled;
+var
+  ResultCode: Integer;
+begin
+  ShellExec('runas', ExpandConstant('{sys}\sc.exe'), 'start NeuralGuard', '',
+    SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
     StopNeuralGuard;   // best-effort; CloseApplications/restart-manager covers the rest
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('startup') then
-    InstallStartupTask;
+  if CurStep = ssPostInstall then
+  begin
+    if WizardIsTaskSelected('startup') then
+      InstallStartupTask;
+    RestartServiceIfInstalled;
+  end;
 end;
 
 // Best-effort cleanup on uninstall: remove the background service and clear

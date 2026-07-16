@@ -5,6 +5,21 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.5] - 2026-07-15
+
+### Fixed
+
+- **An in-app update left protection off until the next reboot, which looked
+  like your enforce/learn choice had been forgotten.** It hadn't: the install
+  step stops the background service (via the SCM, so its own files can be
+  replaced) deliberately *without* touching what mode you'd chosen — but
+  stopping a service doesn't restart it, and nothing did. Auto-start only means
+  "at boot," so the service just sat there, off, until you rebooted. The
+  installer now restarts the service after every install, which resumes
+  whatever mode you'd actually set. Verified by reproducing the exact
+  sequence — stop, confirm the setting survived untouched, restart — and
+  confirming it comes back in the same mode instead of idle.
+
 ## [1.5.4] - 2026-07-15
 
 ### Fixed

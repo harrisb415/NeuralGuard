@@ -510,7 +510,7 @@ service is protection before/without a login. TinyWall's shape is the target.
 never own UI in the interactive desktop session — two processes (backend service +
 frontend tray/dashboard) is the real floor, not one.
 
-### Post-release fixes (found by actually using v1.5.0/1.5.1/1.5.2/1.5.3) ✅ DONE — shipped as v1.5.1, v1.5.2, v1.5.3, v1.5.4
+### Post-release fixes (found by actually using v1.5.0/1.5.1/1.5.2/1.5.3/1.5.4) ✅ DONE — shipped as v1.5.1–v1.5.5
 Both found within hours, from the user installing on their physical host and
 reporting exactly what they saw — not from VM testing, which hadn't exercised
 either path.
@@ -643,6 +643,24 @@ either path.
   no `--tray` argument on that Run entry either, since the user is actively at
   the app when this fires and the window reappearing IS the confirmation - no
   separate "update succeeded" message needed.
+- ✅ **1.5.5 — 1.5.4's fix exposed one more gap: an in-app update left
+  protection off until the next reboot.** `StopNeuralGuard` (`ssInstall`) stops
+  the service via the SCM so its files can be replaced, deliberately without
+  `--off` so `desired_mode` survives the upgrade untouched - that part already
+  worked. But stopping a service doesn't restart it, and `SERVICE_AUTO_START`
+  only means "at boot," not "resume after being manually stopped." Nothing
+  brought it back, so the service just sat there, off, until the next reboot -
+  which looks exactly like "my enforce/learn choice got reverted to idle,"
+  even though the choice itself (`desired_mode`) was preserved correctly the
+  whole time; it just never got the chance to take effect again. Added
+  `RestartServiceIfInstalled` at `ssPostInstall`: an unconditional, best-effort
+  `sc start NeuralGuard` - harmless no-op on a fresh install where no service
+  is registered yet, same tolerance as the schtasks `/delete` on uninstall.
+  VM-verified by reproducing the exact sequence: set `desired_mode=learning` →
+  simulated the installer's stop (`ngd stop`, no `--off`) → confirmed
+  `desired_mode=learning` survived while `mode=idle` (service correctly not
+  running) → simulated the new restart step (`sc start`) → **`mode=learning`**,
+  not idle - proving the fix without needing a full install/upgrade cycle.
 
 ## Phase 3 — Habit scoring & autonomy
 
