@@ -9,6 +9,7 @@
 #include "ColWidths.h"
 #include "core/updater.h"              // shared in-app updater (compiled from src/core)
 #include "core/version.h"              // NG_VERSION, for the About section
+#include "SemBrush.h"                  // SemBrush::SetLightTheme (converter can't see ActualTheme)
 #include "core/cmd.h"                  // command pipe to the running service
 #include "Tray.h"                      // the tray icon, formerly ngtray.exe
 
@@ -78,15 +79,9 @@ namespace winrt::NeuralGuard::implementation
         // its empty space draggable. Caption buttons blend with the dark surface.
         ExtendsContentIntoTitleBar(true);
         SetTitleBar(DragRegion());
-        if (auto tb = AppWindow().TitleBar())
-        {
-            tb.ButtonBackgroundColor(winrt::Windows::UI::Color{ 0, 0, 0, 0 });
-            tb.ButtonInactiveBackgroundColor(winrt::Windows::UI::Color{ 0, 0, 0, 0 });
-            tb.ButtonForegroundColor(winrt::Windows::UI::Color{ 255, 232, 236, 244 });
-            tb.ButtonInactiveForegroundColor(winrt::Windows::UI::Color{ 120, 232, 236, 244 });
-            tb.ButtonHoverBackgroundColor(winrt::Windows::UI::Color{ 40, 255, 255, 255 });
-            tb.ButtonHoverForegroundColor(winrt::Windows::UI::Color{ 255, 255, 255, 255 });
-        }
+        // Caption colours are applied by ApplyCaptionColors (called from
+        // SyncThemeDependents) - they're an AppWindow API, not XAML resources,
+        // so they can't follow ThemeResource and must be re-set per theme.
 
         // Window/taskbar icon: AppWindow doesn't inherit the exe's embedded .rc
         // icon on its own, so point it at the loose copy deployed next to the
@@ -680,6 +675,7 @@ namespace winrt::NeuralGuard::implementation
     void MainWindow::ShowView(hstring const& tag)
     {
         curView_ = tag;
+        viewReady_ = true;
         liveItemsValid_ = false;   // force one full rebuild before Live's incremental diff resumes
         hstring title = L"Live";
         if (tag == L"rules") title = L"Rules";
@@ -959,6 +955,64 @@ namespace winrt::NeuralGuard::implementation
         root.RequestedTheme(theme == "light"  ? ElementTheme::Light
                           : theme == "system" ? ElementTheme::Default
                                               : ElementTheme::Dark);
+
+        // ActualTheme, not the requested one: 'system' resolves to whatever
+        // Windows is currently set to, and SemBrush needs the concrete answer.
+        SyncThemeDependents();
+
+        // 'system' means the theme can change without us: hook ActualThemeChanged
+        // once so SemBrush + the caption buttons follow an OS switch too. (The
+        // token brushes are ThemeResource and re-resolve on their own.)
+        if (!themeHooked_)
+        {
+            themeHooked_ = true;
+            root.ActualThemeChanged([this](FrameworkElement const&, IInspectable const&) {
+                SyncThemeDependents();
+            });
+        }
+    }
+
+    // Minimize/maximize/close glyphs. Transparent backgrounds either way so the
+    // custom title bar shows through; only the glyph colour flips. Hardcoded to
+    // match NG.Color.Text.Primary per theme - these are set through an AppWindow
+    // API that can't read XAML resources.
+    void MainWindow::ApplyCaptionColors(bool light)
+    {
+        auto tb = AppWindow().TitleBar();
+        if (!tb) return;
+        using winrt::Windows::UI::Color;
+        const Color fg     = light ? Color{ 255, 17, 21, 28 }    : Color{ 255, 232, 236, 244 };
+        const Color fgIdle = light ? Color{ 120, 17, 21, 28 }    : Color{ 120, 232, 236, 244 };
+        const Color hover  = light ? Color{ 26, 0, 0, 0 }        : Color{ 40, 255, 255, 255 };
+        const Color hoverFg= light ? Color{ 255, 0, 0, 0 }       : Color{ 255, 255, 255, 255 };
+
+        tb.ButtonBackgroundColor(Color{ 0, 0, 0, 0 });
+        tb.ButtonInactiveBackgroundColor(Color{ 0, 0, 0, 0 });
+        tb.ButtonForegroundColor(fg);
+        tb.ButtonInactiveForegroundColor(fgIdle);
+        tb.ButtonHoverBackgroundColor(hover);
+        tb.ButtonHoverForegroundColor(hoverFg);
+    }
+
+    // The two things that don't follow ThemeResource on their own: the SemBrush
+    // converter (no element, so it can't see ActualTheme) and the caption
+    // buttons (an AppWindow TitleBar API, not part of the XAML resource system).
+    void MainWindow::SyncThemeDependents()
+    {
+        auto root = Content().try_as<FrameworkElement>();
+        const bool light = root && root.ActualTheme() == ElementTheme::Light;
+
+        SemBrush::SetLightTheme(light);
+        ApplyCaptionColors(light);
+
+        // Existing rows were built with the old brushes; the converter only runs
+        // on (re)binding, so force a rebuild to repaint the verdict pills.
+        // Guarded: ApplyTheme runs from the constructor, before ShowView() has
+        // established a view - refreshing then would query for a view that isn't
+        // set up yet. The initial ShowView paints with the right theme anyway,
+        // since SetLightTheme has already landed by that point.
+        liveItemsValid_ = false;
+        if (!curView_.empty() && viewReady_) RefreshCurrent();
     }
 
     void MainWindow::OnThemeChanged(IInspectable const& sender, RoutedEventArgs const&)

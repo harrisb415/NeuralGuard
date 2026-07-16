@@ -2,89 +2,220 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
-    <!-- Backgrounds -->
-    <Color x:Key="NG.Color.BG.Base">#FF0A0B0F</Color>
-    <Color x:Key="NG.Color.BG.Surface">#FF12141A</Color>
-    <Color x:Key="NG.Color.BG.Elevated">#FF1A1D26</Color>
-    <Color x:Key="NG.Color.BG.Overlay">#CC0A0B0F</Color>
+    <!-- Every colour lives in a ThemeDictionary so it can change at runtime.
+         Consumers MUST use {ThemeResource ...}, not {StaticResource ...}:
+         StaticResource resolves once at parse time and would freeze whichever
+         theme happened to be active when the window loaded.
 
-    <!-- Accents -->
-    <Color x:Key="NG.Color.Cyan">#FF00E5FF</Color>
-    <Color x:Key="NG.Color.CyanDim">#3300E5FF</Color>
-    <Color x:Key="NG.Color.CyanSubtle">#1A00E5FF</Color>
-    <Color x:Key="NG.Color.Blue">#FF0066FF</Color>
-    <Color x:Key="NG.Color.BlueDim">#330066FF</Color>
+         Dark is the designed look (neon-on-near-black). Light is NOT a mechanical
+         inversion of it - neon cyan/green/amber are essentially invisible on
+         white, so the accent and verdict colours are re-picked as deeper,
+         saturated equivalents that keep the same MEANING (cyan=accent,
+         green=allow, red=block, amber=monitor) at legible contrast on a light
+         surface. The dim/*Dim fills stay low-alpha tints of the same hue in both.
 
-    <!-- Verdict / semantic -->
-    <Color x:Key="NG.Color.Allow">#FF00FF88</Color>
-    <Color x:Key="NG.Color.AllowDim">#2200FF88</Color>
-    <Color x:Key="NG.Color.CapAllow">#FF00E5FF</Color>
-    <Color x:Key="NG.Color.CapAllowDim">#2200E5FF</Color>
-    <Color x:Key="NG.Color.Block">#FFFF3366</Color>
-    <Color x:Key="NG.Color.BlockDim">#22FF3366</Color>
-    <Color x:Key="NG.Color.Monitor">#FFFFAA00</Color>
-    <Color x:Key="NG.Color.MonitorDim">#22FFAA00</Color>
-    <Color x:Key="NG.Color.Permitted">#FF00FF88</Color>
-    <Color x:Key="NG.Color.PermittedDim">#2200FF88</Color>
+         Keys are identical across both dictionaries - if you add one, add it to
+         both, or a theme switch will fail to resolve it. -->
+    <ResourceDictionary.ThemeDictionaries>
 
-    <!-- Text -->
-    <Color x:Key="NG.Color.Text.Primary">#FFE8ECF4</Color>
-    <Color x:Key="NG.Color.Text.Secondary">#99E8ECF4</Color>
-    <Color x:Key="NG.Color.Text.Muted">#55E8ECF4</Color>
-    <Color x:Key="NG.Color.Text.Accent">#FF00E5FF</Color>
+        <!-- ============================ DARK ============================ -->
+        <ResourceDictionary x:Key="Dark">
+            <!-- Backgrounds -->
+            <Color x:Key="NG.Color.BG.Base">#FF0A0B0F</Color>
+            <Color x:Key="NG.Color.BG.Surface">#FF12141A</Color>
+            <Color x:Key="NG.Color.BG.Elevated">#FF1A1D26</Color>
+            <Color x:Key="NG.Color.BG.Overlay">#CC0A0B0F</Color>
 
-    <!-- Borders -->
-    <Color x:Key="NG.Color.Border.Subtle">#26FFFFFF</Color>
-    <Color x:Key="NG.Color.Border.Accent">#4D00E5FF</Color>
-    <Color x:Key="NG.Color.Border.Focus">#FF00E5FF</Color>
+            <!-- Accents -->
+            <Color x:Key="NG.Color.Cyan">#FF00E5FF</Color>
+            <Color x:Key="NG.Color.CyanDim">#3300E5FF</Color>
+            <Color x:Key="NG.Color.CyanSubtle">#1A00E5FF</Color>
+            <Color x:Key="NG.Color.Blue">#FF0066FF</Color>
+            <Color x:Key="NG.Color.BlueDim">#330066FF</Color>
 
-    <!-- Panic red -->
-    <Color x:Key="NG.Color.Panic">#FFFF3366</Color>
-    <Color x:Key="NG.Color.PanicDim">#33FF3366</Color>
+            <!-- Verdict / semantic -->
+            <Color x:Key="NG.Color.Allow">#FF00FF88</Color>
+            <Color x:Key="NG.Color.AllowDim">#2200FF88</Color>
+            <Color x:Key="NG.Color.CapAllow">#FF00E5FF</Color>
+            <Color x:Key="NG.Color.CapAllowDim">#2200E5FF</Color>
+            <Color x:Key="NG.Color.Block">#FFFF3366</Color>
+            <Color x:Key="NG.Color.BlockDim">#22FF3366</Color>
+            <Color x:Key="NG.Color.Monitor">#FFFFAA00</Color>
+            <Color x:Key="NG.Color.MonitorDim">#22FFAA00</Color>
+            <Color x:Key="NG.Color.Permitted">#FF00FF88</Color>
+            <Color x:Key="NG.Color.PermittedDim">#2200FF88</Color>
 
-    <!-- SolidColorBrushes -->
-    <SolidColorBrush x:Key="NG.Brush.BG.Base"        Color="{StaticResource NG.Color.BG.Base}"/>
-    <SolidColorBrush x:Key="NG.Brush.BG.Surface"     Color="{StaticResource NG.Color.BG.Surface}"/>
-    <SolidColorBrush x:Key="NG.Brush.BG.Elevated"    Color="{StaticResource NG.Color.BG.Elevated}"/>
-    <SolidColorBrush x:Key="NG.Brush.Cyan"           Color="{StaticResource NG.Color.Cyan}"/>
-    <SolidColorBrush x:Key="NG.Brush.CyanDim"        Color="{StaticResource NG.Color.CyanDim}"/>
-    <SolidColorBrush x:Key="NG.Brush.CyanSubtle"     Color="{StaticResource NG.Color.CyanSubtle}"/>
-    <SolidColorBrush x:Key="NG.Brush.Blue"           Color="{StaticResource NG.Color.Blue}"/>
-    <SolidColorBrush x:Key="NG.Brush.Text.Primary"   Color="{StaticResource NG.Color.Text.Primary}"/>
-    <SolidColorBrush x:Key="NG.Brush.Text.Secondary" Color="{StaticResource NG.Color.Text.Secondary}"/>
-    <SolidColorBrush x:Key="NG.Brush.Text.Muted"     Color="{StaticResource NG.Color.Text.Muted}"/>
-    <SolidColorBrush x:Key="NG.Brush.Text.Accent"    Color="{StaticResource NG.Color.Text.Accent}"/>
-    <SolidColorBrush x:Key="NG.Brush.Border.Subtle"  Color="{StaticResource NG.Color.Border.Subtle}"/>
-    <SolidColorBrush x:Key="NG.Brush.Border.Accent"  Color="{StaticResource NG.Color.Border.Accent}"/>
-    <SolidColorBrush x:Key="NG.Brush.Panic"          Color="{StaticResource NG.Color.Panic}"/>
-    <SolidColorBrush x:Key="NG.Brush.PanicDim"       Color="{StaticResource NG.Color.PanicDim}"/>
+            <!-- Text -->
+            <Color x:Key="NG.Color.Text.Primary">#FFE8ECF4</Color>
+            <Color x:Key="NG.Color.Text.Secondary">#99E8ECF4</Color>
+            <Color x:Key="NG.Color.Text.Muted">#55E8ECF4</Color>
+            <Color x:Key="NG.Color.Text.Accent">#FF00E5FF</Color>
 
-    <!-- Verdict foreground brushes (looked up by SemBrush converter) -->
-    <SolidColorBrush x:Key="NG.Brush.Verdict.Allow"     Color="{StaticResource NG.Color.Allow}"/>
-    <SolidColorBrush x:Key="NG.Brush.Verdict.CapAllow"  Color="{StaticResource NG.Color.CapAllow}"/>
-    <SolidColorBrush x:Key="NG.Brush.Verdict.Block"     Color="{StaticResource NG.Color.Block}"/>
-    <SolidColorBrush x:Key="NG.Brush.Verdict.Monitor"   Color="{StaticResource NG.Color.Monitor}"/>
-    <SolidColorBrush x:Key="NG.Brush.Verdict.Permitted" Color="{StaticResource NG.Color.Permitted}"/>
+            <!-- Borders -->
+            <Color x:Key="NG.Color.Border.Subtle">#26FFFFFF</Color>
+            <Color x:Key="NG.Color.Border.Accent">#4D00E5FF</Color>
+            <Color x:Key="NG.Color.Border.Focus">#FF00E5FF</Color>
 
-    <!-- Verdict background brushes -->
-    <SolidColorBrush x:Key="NG.Brush.Verdict.Allow.BG"     Color="{StaticResource NG.Color.AllowDim}"/>
-    <SolidColorBrush x:Key="NG.Brush.Verdict.CapAllow.BG"  Color="{StaticResource NG.Color.CapAllowDim}"/>
-    <SolidColorBrush x:Key="NG.Brush.Verdict.Block.BG"     Color="{StaticResource NG.Color.BlockDim}"/>
-    <SolidColorBrush x:Key="NG.Brush.Verdict.Monitor.BG"   Color="{StaticResource NG.Color.MonitorDim}"/>
-    <SolidColorBrush x:Key="NG.Brush.Verdict.Permitted.BG" Color="{StaticResource NG.Color.PermittedDim}"/>
+            <!-- Panic red -->
+            <Color x:Key="NG.Color.Panic">#FFFF3366</Color>
+            <Color x:Key="NG.Color.PanicDim">#33FF3366</Color>
 
-    <!-- Acrylic brushes -->
-    <AcrylicBrush x:Key="NG.Brush.Acrylic.Sidebar"
-        TintColor="{StaticResource NG.Color.BG.Surface}"
-        TintOpacity="0.90"
-        FallbackColor="{StaticResource NG.Color.BG.Surface}"/>
+            <!-- SolidColorBrushes. Colours are repeated literally rather than
+                 referencing the NG.Color.* keys above: a StaticResource lookup
+                 inside a ThemeDictionary resolves against the dictionary's parse
+                 context, not the active theme, so the indirection buys nothing
+                 here and one changed literal would silently desync the pair. -->
+            <SolidColorBrush x:Key="NG.Brush.BG.Base"        Color="#FF0A0B0F"/>
+            <SolidColorBrush x:Key="NG.Brush.BG.Surface"     Color="#FF12141A"/>
+            <SolidColorBrush x:Key="NG.Brush.BG.Elevated"    Color="#FF1A1D26"/>
+            <SolidColorBrush x:Key="NG.Brush.Cyan"           Color="#FF00E5FF"/>
+            <SolidColorBrush x:Key="NG.Brush.CyanDim"        Color="#3300E5FF"/>
+            <SolidColorBrush x:Key="NG.Brush.CyanSubtle"     Color="#1A00E5FF"/>
+            <SolidColorBrush x:Key="NG.Brush.Blue"           Color="#FF0066FF"/>
+            <SolidColorBrush x:Key="NG.Brush.Text.Primary"   Color="#FFE8ECF4"/>
+            <SolidColorBrush x:Key="NG.Brush.Text.Secondary" Color="#99E8ECF4"/>
+            <SolidColorBrush x:Key="NG.Brush.Text.Muted"     Color="#55E8ECF4"/>
+            <SolidColorBrush x:Key="NG.Brush.Text.Accent"    Color="#FF00E5FF"/>
+            <SolidColorBrush x:Key="NG.Brush.Border.Subtle"  Color="#26FFFFFF"/>
+            <SolidColorBrush x:Key="NG.Brush.Border.Accent"  Color="#4D00E5FF"/>
+            <SolidColorBrush x:Key="NG.Brush.Panic"          Color="#FFFF3366"/>
+            <SolidColorBrush x:Key="NG.Brush.PanicDim"       Color="#33FF3366"/>
 
-    <AcrylicBrush x:Key="NG.Brush.Acrylic.TabBar"
-        TintColor="{StaticResource NG.Color.BG.Surface}"
-        TintOpacity="0.85"
-        FallbackColor="{StaticResource NG.Color.BG.Surface}"/>
+            <!-- Verdict foreground brushes (looked up by the SemBrush converter) -->
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Allow"     Color="#FF00FF88"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.CapAllow"  Color="#FF00E5FF"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Block"     Color="#FFFF3366"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Monitor"   Color="#FFFFAA00"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Permitted" Color="#FF00FF88"/>
 
-    <!-- Shape tokens -->
+            <!-- Verdict background brushes (pill fill) -->
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Allow.BG"     Color="#2200FF88"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.CapAllow.BG"  Color="#2200E5FF"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Block.BG"     Color="#22FF3366"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Monitor.BG"   Color="#22FFAA00"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Permitted.BG" Color="#2200FF88"/>
+
+            <!-- Acrylic -->
+            <AcrylicBrush x:Key="NG.Brush.Acrylic.Sidebar"
+                TintColor="#FF12141A" TintOpacity="0.90" FallbackColor="#FF12141A"/>
+            <AcrylicBrush x:Key="NG.Brush.Acrylic.TabBar"
+                TintColor="#FF12141A" TintOpacity="0.85" FallbackColor="#FF12141A"/>
+
+            <!-- WinUI system-key overrides. These moved here from App.xaml: at
+                 app level they were StaticResource-bound and frozen at parse
+                 time, so they could never follow a theme switch. -->
+            <Color x:Key="SystemAccentColor">#FF00E5FF</Color>
+            <Color x:Key="SystemAccentColorDark1">#FF00BBCC</Color>
+            <Color x:Key="SystemAccentColorDark2">#FF008899</Color>
+            <Color x:Key="SystemAccentColorLight1">#FF33EEFF</Color>
+            <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground"      Color="#FF00E5FF"/>
+            <SolidColorBrush x:Key="NavigationViewItemForegroundSelected"            Color="#FFE8ECF4"/>
+            <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected"            Color="#1A00E5FF"/>
+            <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="#3300E5FF"/>
+            <SolidColorBrush x:Key="ListViewItemBackgroundSelected"                  Color="#1A00E5FF"/>
+            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver"       Color="#3300E5FF"/>
+            <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver"               Color="#1A00E5FF"/>
+        </ResourceDictionary>
+
+        <!-- ============================ LIGHT =========================== -->
+        <ResourceDictionary x:Key="Light">
+            <!-- Backgrounds: near-white base with white cards, mirroring the dark
+                 stack's base/surface/elevated separation rather than inverting it. -->
+            <Color x:Key="NG.Color.BG.Base">#FFF4F6F9</Color>
+            <Color x:Key="NG.Color.BG.Surface">#FFFFFFFF</Color>
+            <Color x:Key="NG.Color.BG.Elevated">#FFFAFBFC</Color>
+            <Color x:Key="NG.Color.BG.Overlay">#CCF4F6F9</Color>
+
+            <!-- Accents: #00E5FF is unreadable on white, so the accent drops to a
+                 deep teal that still reads as the same cyan identity. -->
+            <Color x:Key="NG.Color.Cyan">#FF00778F</Color>
+            <Color x:Key="NG.Color.CyanDim">#3300778F</Color>
+            <Color x:Key="NG.Color.CyanSubtle">#1A00778F</Color>
+            <Color x:Key="NG.Color.Blue">#FF0052CC</Color>
+            <Color x:Key="NG.Color.BlueDim">#330052CC</Color>
+
+            <!-- Verdict / semantic: same meanings, darkened for light surfaces. -->
+            <Color x:Key="NG.Color.Allow">#FF00703C</Color>
+            <Color x:Key="NG.Color.AllowDim">#1F00703C</Color>
+            <Color x:Key="NG.Color.CapAllow">#FF00778F</Color>
+            <Color x:Key="NG.Color.CapAllowDim">#1F00778F</Color>
+            <Color x:Key="NG.Color.Block">#FFC00030</Color>
+            <Color x:Key="NG.Color.BlockDim">#1FC00030</Color>
+            <Color x:Key="NG.Color.Monitor">#FF9A5B00</Color>
+            <Color x:Key="NG.Color.MonitorDim">#1F9A5B00</Color>
+            <Color x:Key="NG.Color.Permitted">#FF00703C</Color>
+            <Color x:Key="NG.Color.PermittedDim">#1F00703C</Color>
+
+            <!-- Text -->
+            <Color x:Key="NG.Color.Text.Primary">#FF11151C</Color>
+            <Color x:Key="NG.Color.Text.Secondary">#A611151C</Color>
+            <Color x:Key="NG.Color.Text.Muted">#6B11151C</Color>
+            <Color x:Key="NG.Color.Text.Accent">#FF00778F</Color>
+
+            <!-- Borders: dark-on-light instead of light-on-dark. -->
+            <Color x:Key="NG.Color.Border.Subtle">#22000000</Color>
+            <Color x:Key="NG.Color.Border.Accent">#4D00778F</Color>
+            <Color x:Key="NG.Color.Border.Focus">#FF00778F</Color>
+
+            <!-- Panic red -->
+            <Color x:Key="NG.Color.Panic">#FFC00030</Color>
+            <Color x:Key="NG.Color.PanicDim">#22C00030</Color>
+
+            <!-- SolidColorBrushes -->
+            <SolidColorBrush x:Key="NG.Brush.BG.Base"        Color="#FFF4F6F9"/>
+            <SolidColorBrush x:Key="NG.Brush.BG.Surface"     Color="#FFFFFFFF"/>
+            <SolidColorBrush x:Key="NG.Brush.BG.Elevated"    Color="#FFFAFBFC"/>
+            <SolidColorBrush x:Key="NG.Brush.Cyan"           Color="#FF00778F"/>
+            <SolidColorBrush x:Key="NG.Brush.CyanDim"        Color="#3300778F"/>
+            <SolidColorBrush x:Key="NG.Brush.CyanSubtle"     Color="#1A00778F"/>
+            <SolidColorBrush x:Key="NG.Brush.Blue"           Color="#FF0052CC"/>
+            <SolidColorBrush x:Key="NG.Brush.Text.Primary"   Color="#FF11151C"/>
+            <SolidColorBrush x:Key="NG.Brush.Text.Secondary" Color="#A611151C"/>
+            <SolidColorBrush x:Key="NG.Brush.Text.Muted"     Color="#6B11151C"/>
+            <SolidColorBrush x:Key="NG.Brush.Text.Accent"    Color="#FF00778F"/>
+            <SolidColorBrush x:Key="NG.Brush.Border.Subtle"  Color="#22000000"/>
+            <SolidColorBrush x:Key="NG.Brush.Border.Accent"  Color="#4D00778F"/>
+            <SolidColorBrush x:Key="NG.Brush.Panic"          Color="#FFC00030"/>
+            <SolidColorBrush x:Key="NG.Brush.PanicDim"       Color="#22C00030"/>
+
+            <!-- Verdict foreground brushes (looked up by the SemBrush converter) -->
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Allow"     Color="#FF00703C"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.CapAllow"  Color="#FF00778F"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Block"     Color="#FFC00030"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Monitor"   Color="#FF9A5B00"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Permitted" Color="#FF00703C"/>
+
+            <!-- Verdict background brushes (pill fill) -->
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Allow.BG"     Color="#1F00703C"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.CapAllow.BG"  Color="#1F00778F"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Block.BG"     Color="#1FC00030"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Monitor.BG"   Color="#1F9A5B00"/>
+            <SolidColorBrush x:Key="NG.Brush.Verdict.Permitted.BG" Color="#1F00703C"/>
+
+            <!-- Acrylic -->
+            <AcrylicBrush x:Key="NG.Brush.Acrylic.Sidebar"
+                TintColor="#FFFFFFFF" TintOpacity="0.90" FallbackColor="#FFFFFFFF"/>
+            <AcrylicBrush x:Key="NG.Brush.Acrylic.TabBar"
+                TintColor="#FFFFFFFF" TintOpacity="0.85" FallbackColor="#FFFFFFFF"/>
+
+            <!-- WinUI system-key overrides -->
+            <Color x:Key="SystemAccentColor">#FF00778F</Color>
+            <Color x:Key="SystemAccentColorDark1">#FF005E72</Color>
+            <Color x:Key="SystemAccentColorDark2">#FF004555</Color>
+            <Color x:Key="SystemAccentColorLight1">#FF0093B0</Color>
+            <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground"      Color="#FF00778F"/>
+            <SolidColorBrush x:Key="NavigationViewItemForegroundSelected"            Color="#FF11151C"/>
+            <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected"            Color="#1A00778F"/>
+            <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="#3300778F"/>
+            <SolidColorBrush x:Key="ListViewItemBackgroundSelected"                  Color="#1A00778F"/>
+            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver"       Color="#3300778F"/>
+            <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver"               Color="#1A00778F"/>
+        </ResourceDictionary>
+
+    </ResourceDictionary.ThemeDictionaries>
+
+    <!-- Shape/metric tokens: identical in both themes, so they stay outside the
+         theme dictionaries and remain {StaticResource}. -->
     <CornerRadius x:Key="NG.Corner.Card">8</CornerRadius>
     <CornerRadius x:Key="NG.Corner.Badge">4</CornerRadius>
     <CornerRadius x:Key="NG.Corner.Button">6</CornerRadius>

@@ -31,7 +31,7 @@
 
             <!-- Custom sidebar nav item: cyan left-bar + subtle fill on hover/select. -->
             <Style x:Key="NavItemStyle" TargetType="ListViewItem">
-                <Setter Property="Foreground" Value="{StaticResource NG.Brush.Text.Secondary}"/>
+                <Setter Property="Foreground" Value="{ThemeResource NG.Brush.Text.Secondary}"/>
                 <Setter Property="FontSize" Value="13.5"/>
                 <Setter Property="Margin" Value="0,1"/>
                 <Setter Property="Padding" Value="0"/>
@@ -42,7 +42,7 @@
                         <ControlTemplate TargetType="ListViewItem">
                             <Grid x:Name="Root" Background="Transparent" CornerRadius="8" Height="42">
                                 <Rectangle x:Name="Bar" Width="3" HorizontalAlignment="Left" Margin="0,9"
-                                           RadiusX="2" RadiusY="2" Fill="{StaticResource NG.Brush.Cyan}" Opacity="0"/>
+                                           RadiusX="2" RadiusY="2" Fill="{ThemeResource NG.Brush.Cyan}" Opacity="0"/>
                                 <ContentPresenter x:Name="CP" Margin="14,0" VerticalContentAlignment="Center"
                                                   Content="{TemplateBinding Content}" Foreground="{TemplateBinding Foreground}"/>
                                 <VisualStateManager.VisualStateGroups>
@@ -50,29 +50,29 @@
                                         <VisualState x:Name="Normal"/>
                                         <VisualState x:Name="PointerOver">
                                             <VisualState.Setters>
-                                                <Setter Target="Root.Background" Value="{StaticResource NG.Brush.CyanSubtle}"/>
-                                                <Setter Target="CP.Foreground" Value="{StaticResource NG.Brush.Text.Primary}"/>
+                                                <Setter Target="Root.Background" Value="{ThemeResource NG.Brush.CyanSubtle}"/>
+                                                <Setter Target="CP.Foreground" Value="{ThemeResource NG.Brush.Text.Primary}"/>
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="Selected">
                                             <VisualState.Setters>
-                                                <Setter Target="Root.Background" Value="{StaticResource NG.Brush.CyanSubtle}"/>
+                                                <Setter Target="Root.Background" Value="{ThemeResource NG.Brush.CyanSubtle}"/>
                                                 <Setter Target="Bar.Opacity" Value="1"/>
-                                                <Setter Target="CP.Foreground" Value="{StaticResource NG.Brush.Text.Primary}"/>
+                                                <Setter Target="CP.Foreground" Value="{ThemeResource NG.Brush.Text.Primary}"/>
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="PointerOverSelected">
                                             <VisualState.Setters>
-                                                <Setter Target="Root.Background" Value="{StaticResource NG.Brush.CyanSubtle}"/>
+                                                <Setter Target="Root.Background" Value="{ThemeResource NG.Brush.CyanSubtle}"/>
                                                 <Setter Target="Bar.Opacity" Value="1"/>
-                                                <Setter Target="CP.Foreground" Value="{StaticResource NG.Brush.Text.Primary}"/>
+                                                <Setter Target="CP.Foreground" Value="{ThemeResource NG.Brush.Text.Primary}"/>
                                             </VisualState.Setters>
                                         </VisualState>
                                         <VisualState x:Name="PressedSelected">
                                             <VisualState.Setters>
-                                                <Setter Target="Root.Background" Value="{StaticResource NG.Brush.CyanSubtle}"/>
+                                                <Setter Target="Root.Background" Value="{ThemeResource NG.Brush.CyanSubtle}"/>
                                                 <Setter Target="Bar.Opacity" Value="1"/>
-                                                <Setter Target="CP.Foreground" Value="{StaticResource NG.Brush.Text.Primary}"/>
+                                                <Setter Target="CP.Foreground" Value="{ThemeResource NG.Brush.Text.Primary}"/>
                                             </VisualState.Setters>
                                         </VisualState>
                                     </VisualStateGroup>
@@ -86,8 +86,8 @@
 
         <!-- Integrated title bar (extends into the window caption; see MainWindow ctor) -->
         <Border Grid.Row="0" x:Name="TitleBar" Height="52"
-                Background="{StaticResource NG.Brush.BG.Surface}"
-                BorderBrush="{StaticResource NG.Brush.Border.Subtle}" BorderThickness="0,0,0,1">
+                Background="{ThemeResource NG.Brush.BG.Surface}"
+                BorderBrush="{ThemeResource NG.Brush.Border.Subtle}" BorderThickness="0,0,0,1">
             <Grid>
                 <Border x:Name="DragRegion" Background="Transparent"/>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="22" Margin="18,0,0,0">
@@ -104,7 +104,7 @@
                                        HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <TextBlock Text="NeuralGuard" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center"
-                                   Foreground="{StaticResource NG.Brush.Text.Primary}"/>
+                                   Foreground="{ThemeResource NG.Brush.Text.Primary}"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="9">
                         <Button Content="Enforce" Click="OnEnforce" Style="{StaticResource NG.Button.Primary}"/>
@@ -116,38 +116,38 @@
                 <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right"
                             VerticalAlignment="Center" Margin="0,0,150,0">
                     <Grid Width="14" Height="14" VerticalAlignment="Center">
-                        <Ellipse Width="14" Height="14" Fill="{StaticResource NG.Brush.Cyan}" Opacity="0.28"/>
-                        <Ellipse x:Name="ModeDot" Width="8" Height="8" Fill="{StaticResource NG.Brush.Cyan}"/>
+                        <Ellipse Width="14" Height="14" Fill="{ThemeResource NG.Brush.Cyan}" Opacity="0.28"/>
+                        <Ellipse x:Name="ModeDot" Width="8" Height="8" Fill="{ThemeResource NG.Brush.Cyan}"/>
                     </Grid>
                     <TextBlock x:Name="ModeText" Text="idle" FontSize="13" VerticalAlignment="Center"
-                               Foreground="{StaticResource NG.Brush.Text.Secondary}"/>
+                               Foreground="{ThemeResource NG.Brush.Text.Secondary}"/>
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- Custom sidebar + content -->
         <Grid Grid.Row="1" ColumnDefinitions="210,*">
-            <Border Grid.Column="0" Background="{StaticResource NG.Brush.BG.Surface}"
-                    BorderBrush="{StaticResource NG.Brush.Border.Subtle}" BorderThickness="0,0,1,0">
+            <Border Grid.Column="0" Background="{ThemeResource NG.Brush.BG.Surface}"
+                    BorderBrush="{ThemeResource NG.Brush.Border.Subtle}" BorderThickness="0,0,1,0">
                 <Grid RowDefinitions="*,Auto">
                     <ListView Grid.Row="0" x:Name="NavList" SelectionMode="Single" Padding="10,12,10,0"
                               Background="Transparent" SelectionChanged="OnNavSelect"
                               ItemContainerStyle="{StaticResource NavItemStyle}">
-                        <ListViewItem Tag="live"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M18.5,12L18.28,13.68L17.63,15.25L16.6,16.6L15.25,17.63L13.68,18.28L12,18.5L10.32,18.28L8.75,17.63L7.4,16.6L6.37,15.25L5.72,13.68L5.5,12L5.72,10.32L6.37,8.75L7.4,7.4L8.75,6.37L10.32,5.72L12,5.5L13.68,5.72L15.25,6.37L16.6,7.4L17.63,8.75L18.28,10.32Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Live" VerticalAlignment="Center"/></StackPanel></ListViewItem>
-                        <ListViewItem Tag="rules"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M3,5L21,5L21,8L3,8Z M3,10.5L17,10.5L17,13.5L3,13.5Z M3,16L13,16L13,19L3,19Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Rules" VerticalAlignment="Center"/></StackPanel></ListViewItem>
-                        <ListViewItem Tag="habits"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M18.89,6.21L20.46,8.92L21,12L20.46,15.08L18.89,17.79L16.5,19.79L13.56,20.86L10.44,20.86L7.5,19.79L5.11,17.79L3.54,15.08L3,12L3.54,8.92L7.4,8.14L6.36,9.95L6,12L6.36,14.05L7.4,15.86L9,17.2L10.96,17.91L13.04,17.91L15,17.2L16.6,15.86L17.64,14.05L18,12L17.64,9.95Z M20,6L23,10L15,10Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Habits" VerticalAlignment="Center"/></StackPanel></ListViewItem>
-                        <ListViewItem Tag="apps"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M2,2L10,2L10,10L2,10Z M14,2L22,2L22,10L14,10Z M2,14L10,14L10,22L2,22Z M14,14L22,14L22,22L14,22Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Per-app" VerticalAlignment="Center"/></StackPanel></ListViewItem>
-                        <ListViewItem Tag="flows"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M2,4L8,4L14,12L8,20L2,20L8,12Z M11,4L17,4L23,12L17,20L11,20L17,12Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Flows" VerticalAlignment="Center"/></StackPanel></ListViewItem>
-                        <ListViewItem Tag="flags"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M4,2L6.4,2L6.4,22L4,22Z M6.4,3L20,7L6.4,11Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Flags" VerticalAlignment="Center"/></StackPanel></ListViewItem>
-                        <ListViewItem Tag="baseline"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M3,16L7,16L7,21L3,21Z M10,10L14,10L14,21L10,21Z M17,4L21,4L21,21L17,21Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Baseline" VerticalAlignment="Center"/></StackPanel></ListViewItem>
-                        <ListViewItem Tag="inbound"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M19,3L22,3L22,21L19,21Z M2,10.5L11,10.5L11,13.5L2,13.5Z M10,6.5L17,12L10,17.5Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Inbound" VerticalAlignment="Center"/></StackPanel></ListViewItem>
-                        <ListViewItem Tag="feedback"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M3,3L21,3L21,16L3,16Z M7,16L13,16L7,21Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Feedback" VerticalAlignment="Center"/></StackPanel></ListViewItem>
-                        <ListViewItem Tag="digest"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F0 M4,2L20,2L20,22L4,22Z M14,2L20,2L20,8Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Digest" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="live"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M18.5,12L18.28,13.68L17.63,15.25L16.6,16.6L15.25,17.63L13.68,18.28L12,18.5L10.32,18.28L8.75,17.63L7.4,16.6L6.37,15.25L5.72,13.68L5.5,12L5.72,10.32L6.37,8.75L7.4,7.4L8.75,6.37L10.32,5.72L12,5.5L13.68,5.72L15.25,6.37L16.6,7.4L17.63,8.75L18.28,10.32Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Live" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="rules"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M3,5L21,5L21,8L3,8Z M3,10.5L17,10.5L17,13.5L3,13.5Z M3,16L13,16L13,19L3,19Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Rules" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="habits"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M18.89,6.21L20.46,8.92L21,12L20.46,15.08L18.89,17.79L16.5,19.79L13.56,20.86L10.44,20.86L7.5,19.79L5.11,17.79L3.54,15.08L3,12L3.54,8.92L7.4,8.14L6.36,9.95L6,12L6.36,14.05L7.4,15.86L9,17.2L10.96,17.91L13.04,17.91L15,17.2L16.6,15.86L17.64,14.05L18,12L17.64,9.95Z M20,6L23,10L15,10Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Habits" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="apps"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M2,2L10,2L10,10L2,10Z M14,2L22,2L22,10L14,10Z M2,14L10,14L10,22L2,22Z M14,14L22,14L22,22L14,22Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Per-app" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="flows"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M2,4L8,4L14,12L8,20L2,20L8,12Z M11,4L17,4L23,12L17,20L11,20L17,12Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Flows" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="flags"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M4,2L6.4,2L6.4,22L4,22Z M6.4,3L20,7L6.4,11Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Flags" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="baseline"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M3,16L7,16L7,21L3,21Z M10,10L14,10L14,21L10,21Z M17,4L21,4L21,21L17,21Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Baseline" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="inbound"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M19,3L22,3L22,21L19,21Z M2,10.5L11,10.5L11,13.5L2,13.5Z M10,6.5L17,12L10,17.5Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Inbound" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="feedback"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M3,3L21,3L21,16L3,16Z M7,16L13,16L7,21Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Feedback" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="digest"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F0 M4,2L20,2L20,22L4,22Z M14,2L20,2L20,8Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Digest" VerticalAlignment="Center"/></StackPanel></ListViewItem>
                     </ListView>
                     <ListView Grid.Row="1" x:Name="NavFooter" SelectionMode="Single" Padding="10,0,10,12"
                               Background="Transparent" SelectionChanged="OnNavSelect"
                               ItemContainerStyle="{StaticResource NavItemStyle}">
-                        <ListViewItem Tag="settings"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M17.5,12L17.31,13.42L16.76,14.75L15.89,15.89L14.75,16.76L13.42,17.31L12,17.5L10.58,17.31L9.25,16.76L8.11,15.89L7.24,14.75L6.69,13.42L6.5,12L6.69,10.58L7.24,9.25L8.11,8.11L9.25,7.24L10.58,6.69L12,6.5L13.42,6.69L14.75,7.24L15.89,8.11L16.76,9.25L17.31,10.58Z M17,14.2L17,9.8L20.6,9.8L20.6,14.2Z M13.98,17.09L17.09,13.98L19.64,16.53L16.53,19.64Z M9.8,17L14.2,17L14.2,20.6L9.8,20.6Z M6.91,13.98L10.02,17.09L7.47,19.64L4.36,16.53Z M7,9.8L7,14.2L3.4,14.2L3.4,9.8Z M10.02,6.91L6.91,10.02L4.36,7.47L7.47,4.36Z M14.2,7L9.8,7L9.8,3.4L14.2,3.4Z M17.09,10.02L13.98,6.91L16.53,4.36L19.64,7.47Z" Width="18" Height="16" Foreground="{StaticResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Settings" VerticalAlignment="Center"/></StackPanel></ListViewItem>
+                        <ListViewItem Tag="settings"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Data="F1 M17.5,12L17.31,13.42L16.76,14.75L15.89,15.89L14.75,16.76L13.42,17.31L12,17.5L10.58,17.31L9.25,16.76L8.11,15.89L7.24,14.75L6.69,13.42L6.5,12L6.69,10.58L7.24,9.25L8.11,8.11L9.25,7.24L10.58,6.69L12,6.5L13.42,6.69L14.75,7.24L15.89,8.11L16.76,9.25L17.31,10.58Z M17,14.2L17,9.8L20.6,9.8L20.6,14.2Z M13.98,17.09L17.09,13.98L19.64,16.53L16.53,19.64Z M9.8,17L14.2,17L14.2,20.6L9.8,20.6Z M6.91,13.98L10.02,17.09L7.47,19.64L4.36,16.53Z M7,9.8L7,14.2L3.4,14.2L3.4,9.8Z M10.02,6.91L6.91,10.02L4.36,7.47L7.47,4.36Z M14.2,7L9.8,7L9.8,3.4L14.2,3.4Z M17.09,10.02L13.98,6.91L16.53,4.36L19.64,7.47Z" Width="18" Height="16" Foreground="{ThemeResource NG.Brush.Cyan}" Opacity="0.55" VerticalAlignment="Center"/><TextBlock Text="Settings" VerticalAlignment="Center"/></StackPanel></ListViewItem>
                     </ListView>
                 </Grid>
             </Border>
@@ -292,12 +292,12 @@
                      per view (widths set in ShowView, synced to rows by OnContainerChanging);
                      tap a header to sort. -->
                 <Border Grid.Row="1" x:Name="TableCard"
-                        Background="{StaticResource NG.Brush.BG.Surface}"
-                        BorderBrush="{StaticResource NG.Brush.Border.Subtle}"
+                        Background="{ThemeResource NG.Brush.BG.Surface}"
+                        BorderBrush="{ThemeResource NG.Brush.Border.Subtle}"
                         BorderThickness="1" CornerRadius="12">
                     <Grid RowDefinitions="Auto,*">
                         <Grid Grid.Row="0" x:Name="HeaderRow" Height="46" Padding="20,0"
-                              BorderBrush="{StaticResource NG.Brush.Border.Subtle}" BorderThickness="0,0,0,1">
+                              BorderBrush="{ThemeResource NG.Brush.Border.Subtle}" BorderThickness="0,0,0,1">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition x:Name="HCol0" Width="140"/>
                                 <ColumnDefinition x:Name="HCol1" Width="130"/>
@@ -378,7 +378,7 @@
                                 <TextBlock Text="Run enforcement as a Windows service (LocalSystem, auto-start) so it keeps guarding after you log off or reboot."
                                            Style="{StaticResource NG.Text.Secondary}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                 <TextBlock x:Name="SvcStatus" Text="Checking..." FontStyle="Italic"
-                                           Foreground="{StaticResource NG.Brush.Text.Secondary}" Margin="0,0,0,16"/>
+                                           Foreground="{ThemeResource NG.Brush.Text.Secondary}" Margin="0,0,0,16"/>
                                 <StackPanel Orientation="Horizontal" Spacing="10">
                                     <Button Content="Install service" Click="OnServiceInstall" Style="{StaticResource NG.Button.Primary}"/>
                                     <Button Content="Remove service" Click="OnServiceRemove" Style="{StaticResource NG.Button.Ghost}"/>
@@ -393,14 +393,14 @@
                                            Style="{StaticResource NG.Text.Secondary}" TextWrapping="Wrap" Margin="0,0,0,16"/>
                                 <Grid>
                                     <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
-                                        <TextBlock Text="Collect flow features" Foreground="{StaticResource NG.Brush.Text.Primary}"/>
+                                        <TextBlock Text="Collect flow features" Foreground="{ThemeResource NG.Brush.Text.Primary}"/>
                                         <TextBlock Text="Archive completed connections so the ML models can score them"
                                                    Style="{StaticResource NG.Text.Secondary}" FontSize="12"/>
                                     </StackPanel>
                                     <ToggleSwitch x:Name="FeatureToggle" OnContent="On" OffContent="Off"
                                                   Toggled="OnFeatureToggle" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                 </Grid>
-                                <Border Height="1" Background="{StaticResource NG.Brush.Border.Subtle}" Margin="0,18"/>
+                                <Border Height="1" Background="{ThemeResource NG.Brush.Border.Subtle}" Margin="0,18"/>
                                 <TextBlock Text="Scoring mode" FontWeight="SemiBold" Margin="0,0,0,4"/>
                                 <RadioButton x:Name="Ml0" Tag="off" GroupName="mlmode" Checked="OnMlModeChanged"
                                              Style="{StaticResource NG.RadioButton}" Content="Off - don't score"/>
@@ -409,9 +409,9 @@
                                 <RadioButton x:Name="Ml2" Tag="active" GroupName="mlmode" Checked="OnMlModeChanged"
                                              Style="{StaticResource NG.RadioButton}" Content="Active - a strongly-malicious score can demote a trusted app so it prompts again"/>
                                 <TextBlock Text="Active never auto-blocks: a demoted app simply loses its automatic pass and asks you the next time it connects, exactly like a brand-new app. Only enable this once the models are trained on your own traffic - the shipped models are placeholders. Demotions show under the Flags view."
-                                           Foreground="{StaticResource NG.Brush.Text.Muted}" TextWrapping="Wrap" FontStyle="Italic" FontSize="11.5" Margin="30,8,0,0" MaxWidth="600" HorizontalAlignment="Left"/>
+                                           Foreground="{ThemeResource NG.Brush.Text.Muted}" TextWrapping="Wrap" FontStyle="Italic" FontSize="11.5" Margin="30,8,0,0" MaxWidth="600" HorizontalAlignment="Left"/>
                                 <StackPanel x:Name="GatesPanel" Visibility="Collapsed">
-                                    <Border Height="1" Background="{StaticResource NG.Brush.Border.Subtle}" Margin="0,18"/>
+                                    <Border Height="1" Background="{ThemeResource NG.Brush.Border.Subtle}" Margin="0,18"/>
                                     <TextBlock Text="CONFIDENCE GATES (ACTIVE MODE)" Style="{StaticResource NG.Text.SectionHeader}" Margin="0,0,0,4"/>
                                     <TextBlock Text="How strong a score must be before Active mode acts. Higher malicious / lower (more negative) anomaly = fewer, higher-confidence flags."
                                                Style="{StaticResource NG.Text.Muted}" TextWrapping="Wrap" Margin="0,0,0,12"/>
@@ -435,7 +435,7 @@
                                 <TextBlock Text="Check GitHub for a newer release. Installing downloads the verified installer and hands off to it - the app will close so it can update."
                                            Style="{StaticResource NG.Text.Secondary}" TextWrapping="Wrap" Margin="0,0,0,10"/>
                                 <TextBlock x:Name="UpdateStatus" Text="" FontStyle="Italic"
-                                           Foreground="{StaticResource NG.Brush.Text.Secondary}" Margin="0,0,0,14"/>
+                                           Foreground="{ThemeResource NG.Brush.Text.Secondary}" Margin="0,0,0,14"/>
                                 <muxc:ProgressBar x:Name="UpdateProgress" Visibility="Collapsed"
                                                   Minimum="0" Maximum="100" Margin="0,0,0,14"/>
                                 <StackPanel Orientation="Horizontal" Spacing="10">

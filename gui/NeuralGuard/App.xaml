@@ -18,20 +18,11 @@
                 <ResourceDictionary Source="ms-appx:///Themes/NeuralGuardStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
-            <!-- Neon cyan accent (replaces the default system accent) -->
-            <Color x:Key="SystemAccentColor">#FF00E5FF</Color>
-            <Color x:Key="SystemAccentColorDark1">#FF00BBCC</Color>
-            <Color x:Key="SystemAccentColorDark2">#FF008899</Color>
-            <Color x:Key="SystemAccentColorLight1">#FF33EEFF</Color>
-
-            <!-- Sidebar + list selection = neon cyan -->
-            <SolidColorBrush x:Key="NavigationViewSelectionIndicatorForeground" Color="{StaticResource NG.Color.Cyan}" />
-            <SolidColorBrush x:Key="NavigationViewItemForegroundSelected" Color="{StaticResource NG.Color.Text.Primary}" />
-            <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Color="{StaticResource NG.Color.CyanSubtle}" />
-            <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="{StaticResource NG.Color.CyanDim}" />
-            <SolidColorBrush x:Key="ListViewItemBackgroundSelected" Color="{StaticResource NG.Color.CyanSubtle}" />
-            <SolidColorBrush x:Key="ListViewItemBackgroundSelectedPointerOver" Color="{StaticResource NG.Color.CyanDim}" />
-            <SolidColorBrush x:Key="ListViewItemBackgroundPointerOver" Color="{StaticResource NG.Color.CyanSubtle}" />
+            <!-- The accent + sidebar/list-selection system-key overrides used to
+                 live here, bound with {StaticResource NG.Color.*}. They moved into
+                 the ThemeDictionaries in NeuralGuardColors.xaml: an app-level
+                 resource is resolved once at parse time, so anything defined here
+                 could never follow a runtime theme switch. -->
 
             <!-- Semantic cell-color converter (Live verdicts, Baseline state, ...) -->
             <local:SemBrush x:Key="SemBrush" />

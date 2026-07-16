@@ -66,6 +66,8 @@ namespace winrt::NeuralGuard::implementation
         HWND WindowHandle();
         void LoadSettings();
         void ApplyTheme(std::string const& theme);   // 'dark' | 'light' | 'system' -> root RequestedTheme
+        void SyncThemeDependents();                  // things ThemeResource can't reach (SemBrush, caption buttons)
+        void ApplyCaptionColors(bool light);
         void RefreshServiceStatus();
         int  ReadAutonomy();
         void WriteAutonomy(int level);
@@ -121,6 +123,9 @@ namespace winrt::NeuralGuard::implementation
         // OnTick fires once a second; this counts those ticks so the periodic
         // update check can ride the existing timer instead of needing its own.
         int64_t tickCount_{ 0 };
+
+        bool themeHooked_{ false };   // ActualThemeChanged wired once (see ApplyTheme)
+        bool viewReady_{ false };     // first ShowView() done; before that there's nothing to refresh
     };
 }
 

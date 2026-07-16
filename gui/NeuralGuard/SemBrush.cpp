@@ -10,12 +10,36 @@ using namespace Microsoft::UI::Xaml;
 
 namespace winrt::NeuralGuard::implementation
 {
-    // Resolve an app-level brush resource by key (null if absent).
+    // Set by MainWindow::ApplyTheme. See the note on SemBrush::SetLightTheme.
+    static bool g_light = false;
+
+    void SemBrush::SetLightTheme(bool light) { g_light = light; }
+
+    // Resolve a brush by key from the ACTIVE theme dictionary.
+    //
+    // Plain Application.Resources.Lookup() would resolve against the app-level
+    // theme, which is deliberately never set now (see App.xaml) - so it would
+    // always hand back the same dictionary regardless of the window's theme, and
+    // every verdict pill would keep its dark neon colour on a light background.
+    // Walk the merged dictionaries to the one carrying ThemeDictionaries
+    // (NeuralGuardColors.xaml) and index it explicitly instead.
     static Media::Brush LookupBrush(hstring const& key)
     {
-        auto res = Application::Current().Resources();
         auto k = box_value(key);
-        return res.HasKey(k) ? res.Lookup(k).try_as<Media::Brush>() : nullptr;
+        auto themeKey = box_value(g_light ? hstring{ L"Light" } : hstring{ L"Dark" });
+        auto appRes = Application::Current().Resources();
+
+        for (auto const& merged : appRes.MergedDictionaries())
+        {
+            auto themes = merged.ThemeDictionaries();
+            if (!themes || !themes.HasKey(themeKey)) continue;
+            auto dict = themes.Lookup(themeKey).try_as<ResourceDictionary>();
+            if (dict && dict.HasKey(k))
+                if (auto b = dict.Lookup(k).try_as<Media::Brush>()) return b;
+        }
+        // Fall back to a flat app-level lookup so a key that isn't themed (or a
+        // restructured dictionary) still resolves rather than rendering nothing.
+        return appRes.HasKey(k) ? appRes.Lookup(k).try_as<Media::Brush>() : nullptr;
     }
 
     static Media::Brush Transparent()

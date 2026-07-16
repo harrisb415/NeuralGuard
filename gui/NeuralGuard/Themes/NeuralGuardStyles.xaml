@@ -8,39 +8,39 @@
 
     <!-- TextBlock styles -->
     <Style x:Key="NG.Text.Primary" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource NG.Brush.Text.Primary}"/>
+        <Setter Property="Foreground" Value="{ThemeResource NG.Brush.Text.Primary}"/>
         <Setter Property="FontFamily" Value="Segoe UI Variable"/>
         <Setter Property="FontSize"   Value="14"/>
     </Style>
 
     <Style x:Key="NG.Text.Secondary" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource NG.Brush.Text.Secondary}"/>
+        <Setter Property="Foreground" Value="{ThemeResource NG.Brush.Text.Secondary}"/>
         <Setter Property="FontFamily" Value="Segoe UI Variable"/>
         <Setter Property="FontSize"   Value="13"/>
     </Style>
 
     <Style x:Key="NG.Text.Muted" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource NG.Brush.Text.Muted}"/>
+        <Setter Property="Foreground" Value="{ThemeResource NG.Brush.Text.Muted}"/>
         <Setter Property="FontFamily" Value="Segoe UI Variable"/>
         <Setter Property="FontSize"   Value="11"/>
     </Style>
 
     <Style x:Key="NG.Text.Accent" TargetType="TextBlock">
-        <Setter Property="Foreground"  Value="{StaticResource NG.Brush.Text.Accent}"/>
+        <Setter Property="Foreground"  Value="{ThemeResource NG.Brush.Text.Accent}"/>
         <Setter Property="FontFamily"  Value="Segoe UI Variable"/>
         <Setter Property="FontWeight"  Value="SemiBold"/>
         <Setter Property="FontSize"    Value="13"/>
     </Style>
 
     <Style x:Key="NG.Text.Mono" TargetType="TextBlock">
-        <Setter Property="Foreground" Value="{StaticResource NG.Brush.Text.Secondary}"/>
+        <Setter Property="Foreground" Value="{ThemeResource NG.Brush.Text.Secondary}"/>
         <Setter Property="FontFamily" Value="Consolas"/>
         <Setter Property="FontSize"   Value="12"/>
     </Style>
 
     <!-- Section header: uppercase text passed in code (WinUI has no TextTransform). -->
     <Style x:Key="NG.Text.SectionHeader" TargetType="TextBlock">
-        <Setter Property="Foreground"       Value="{StaticResource NG.Brush.Text.Muted}"/>
+        <Setter Property="Foreground"       Value="{ThemeResource NG.Brush.Text.Muted}"/>
         <Setter Property="FontFamily"       Value="Segoe UI Variable"/>
         <Setter Property="FontSize"         Value="11"/>
         <Setter Property="FontWeight"       Value="SemiBold"/>
@@ -49,9 +49,9 @@
 
     <!-- Button styles -->
     <Style x:Key="NG.Button.Primary" TargetType="Button">
-        <Setter Property="Background"      Value="{StaticResource NG.Brush.Cyan}"/>
-        <Setter Property="Foreground"      Value="{StaticResource NG.Brush.BG.Base}"/>
-        <Setter Property="BorderBrush"     Value="{StaticResource NG.Brush.Cyan}"/>
+        <Setter Property="Background"      Value="{ThemeResource NG.Brush.Cyan}"/>
+        <Setter Property="Foreground"      Value="{ThemeResource NG.Brush.BG.Base}"/>
+        <Setter Property="BorderBrush"     Value="{ThemeResource NG.Brush.Cyan}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius"    Value="{StaticResource NG.Corner.Button}"/>
         <Setter Property="Padding"         Value="16,8"/>
@@ -60,17 +60,17 @@
 
     <Style x:Key="NG.Button.Ghost" TargetType="Button">
         <Setter Property="Background"      Value="Transparent"/>
-        <Setter Property="Foreground"      Value="{StaticResource NG.Brush.Cyan}"/>
-        <Setter Property="BorderBrush"     Value="{StaticResource NG.Brush.Border.Accent}"/>
+        <Setter Property="Foreground"      Value="{ThemeResource NG.Brush.Cyan}"/>
+        <Setter Property="BorderBrush"     Value="{ThemeResource NG.Brush.Border.Accent}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius"    Value="{StaticResource NG.Corner.Button}"/>
         <Setter Property="Padding"         Value="16,8"/>
     </Style>
 
     <Style x:Key="NG.Button.Danger" TargetType="Button">
-        <Setter Property="Background"      Value="{StaticResource NG.Brush.PanicDim}"/>
-        <Setter Property="Foreground"      Value="{StaticResource NG.Brush.Panic}"/>
-        <Setter Property="BorderBrush"     Value="{StaticResource NG.Brush.Panic}"/>
+        <Setter Property="Background"      Value="{ThemeResource NG.Brush.PanicDim}"/>
+        <Setter Property="Foreground"      Value="{ThemeResource NG.Brush.Panic}"/>
+        <Setter Property="BorderBrush"     Value="{ThemeResource NG.Brush.Panic}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius"    Value="{StaticResource NG.Corner.Button}"/>
         <Setter Property="Padding"         Value="16,8"/>
@@ -79,16 +79,16 @@
 
     <!-- Card border styles -->
     <Style x:Key="NG.Card" TargetType="Border">
-        <Setter Property="Background"      Value="{StaticResource NG.Brush.BG.Surface}"/>
-        <Setter Property="BorderBrush"     Value="{StaticResource NG.Brush.Border.Subtle}"/>
+        <Setter Property="Background"      Value="{ThemeResource NG.Brush.BG.Surface}"/>
+        <Setter Property="BorderBrush"     Value="{ThemeResource NG.Brush.Border.Subtle}"/>
         <Setter Property="BorderThickness" Value="{StaticResource NG.Border.Thin}"/>
         <Setter Property="CornerRadius"    Value="{StaticResource NG.Corner.Card}"/>
         <Setter Property="Padding"         Value="{StaticResource NG.Padding.Card}"/>
     </Style>
 
     <Style x:Key="NG.Card.Elevated" TargetType="Border">
-        <Setter Property="Background"      Value="{StaticResource NG.Brush.BG.Elevated}"/>
-        <Setter Property="BorderBrush"     Value="{StaticResource NG.Brush.Border.Accent}"/>
+        <Setter Property="Background"      Value="{ThemeResource NG.Brush.BG.Elevated}"/>
+        <Setter Property="BorderBrush"     Value="{ThemeResource NG.Brush.Border.Accent}"/>
         <Setter Property="BorderThickness" Value="{StaticResource NG.Border.Thin}"/>
         <Setter Property="CornerRadius"    Value="{StaticResource NG.Corner.Card}"/>
         <Setter Property="Padding"         Value="{StaticResource NG.Padding.Card}"/>
@@ -98,12 +98,12 @@
     <Style x:Key="NG.ToggleSwitch" TargetType="ToggleSwitch">
         <Setter Property="OnContent"  Value="On"/>
         <Setter Property="OffContent" Value="Off"/>
-        <Setter Property="Foreground" Value="{StaticResource NG.Brush.Text.Secondary}"/>
+        <Setter Property="Foreground" Value="{ThemeResource NG.Brush.Text.Secondary}"/>
     </Style>
 
     <!-- RadioButton (Scoring mode, Autonomy) -->
     <Style x:Key="NG.RadioButton" TargetType="RadioButton">
-        <Setter Property="Foreground" Value="{StaticResource NG.Brush.Text.Primary}"/>
+        <Setter Property="Foreground" Value="{ThemeResource NG.Brush.Text.Primary}"/>
         <Setter Property="FontFamily" Value="Segoe UI Variable"/>
         <Setter Property="FontSize"   Value="13"/>
         <Setter Property="Margin"     Value="0,4,0,4"/>
@@ -111,9 +111,9 @@
 
     <!-- NumberBox (Confidence gates) -->
     <Style x:Key="NG.NumberBox" TargetType="NumberBox">
-        <Setter Property="Background"      Value="{StaticResource NG.Brush.BG.Elevated}"/>
-        <Setter Property="Foreground"      Value="{StaticResource NG.Brush.Text.Primary}"/>
-        <Setter Property="BorderBrush"     Value="{StaticResource NG.Brush.Border.Accent}"/>
+        <Setter Property="Background"      Value="{ThemeResource NG.Brush.BG.Elevated}"/>
+        <Setter Property="Foreground"      Value="{ThemeResource NG.Brush.Text.Primary}"/>
+        <Setter Property="BorderBrush"     Value="{ThemeResource NG.Brush.Border.Accent}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius"    Value="{StaticResource NG.Corner.Input}"/>
     </Style>
