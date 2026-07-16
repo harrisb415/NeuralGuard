@@ -42,6 +42,9 @@ namespace winrt::NeuralGuard::implementation
         void OnExportFeedback(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnCheckUpdate(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnInstallUpdate(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
+        // Background check on the same cadence as OnTick (see tickCount_): once
+        // ~10s after launch, then once a day for as long as the tray stays up.
+        void CheckForUpdateInBackground();
 
         // The tray icon lives in this process now (see Tray.h). Closing the window
         // hides to tray rather than exiting - the tray is the app's real lifetime.
@@ -112,6 +115,10 @@ namespace winrt::NeuralGuard::implementation
         winrt::Windows::Foundation::Collections::IObservableVector<winrt::Windows::Foundation::IInspectable> liveItems_{ nullptr };
         std::vector<int64_t> liveIds_;
         bool liveItemsValid_{ false };
+
+        // OnTick fires once a second; this counts those ticks so the periodic
+        // update check can ride the existing timer instead of needing its own.
+        int64_t tickCount_{ 0 };
     };
 }
 

@@ -7,6 +7,18 @@ and versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [1.5.5] - 2026-07-15
 
+### Added
+
+- **An About section in Settings** — version, a short description, and links to
+  GitHub, the changelog, and the license.
+- **Automatic update checks.** NeuralGuard now checks for a new release shortly
+  after it starts, then once a day for as long as it keeps running - not just
+  when you remember to click "Check for updates." When one's available, the
+  tray balloons you once (it won't nag about the same release every day) and
+  Settings shows it as available immediately. Verified against the real
+  published manifest: pointed a build at an older embedded version, watched the
+  check correctly detect the newer release and record it as notified.
+
 ### Fixed
 
 - **An in-app update left protection off until the next reboot, which looked

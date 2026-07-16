@@ -433,6 +433,21 @@
                                 </StackPanel>
                             </StackPanel>
                         </Border>
+
+                        <TextBlock Text="ABOUT" Style="{StaticResource NG.Text.SectionHeader}" Margin="0,26,0,10"/>
+                        <Border Style="{StaticResource NG.Card}">
+                            <StackPanel>
+                                <TextBlock Text="NeuralGuard" FontWeight="SemiBold" FontSize="16" Margin="0,0,0,4"/>
+                                <TextBlock x:Name="AboutVersion" Text="v0.0.0" Style="{StaticResource NG.Text.Secondary}" Margin="0,0,0,10"/>
+                                <TextBlock Text="A personal, habit-learning firewall for Windows 11. It watches how you use the network, learns your normal, and quietly blocks the stuff that doesn't fit - built and run by one person on their own machine."
+                                           Style="{StaticResource NG.Text.Secondary}" TextWrapping="Wrap" Margin="0,0,0,14"/>
+                                <StackPanel Orientation="Horizontal" Spacing="18">
+                                    <HyperlinkButton Content="GitHub" NavigateUri="https://github.com/harrisb415/NeuralGuard"/>
+                                    <HyperlinkButton Content="Changelog" NavigateUri="https://github.com/harrisb415/NeuralGuard/blob/main/CHANGELOG.md"/>
+                                    <HyperlinkButton Content="License (MIT)" NavigateUri="https://github.com/harrisb415/NeuralGuard/blob/main/LICENSE"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
 

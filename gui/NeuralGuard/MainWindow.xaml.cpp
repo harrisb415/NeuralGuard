@@ -8,6 +8,7 @@
 #include "Row.h"
 #include "ColWidths.h"
 #include "core/updater.h"              // shared in-app updater (compiled from src/core)
+#include "core/version.h"              // NG_VERSION, for the About section
 #include "core/cmd.h"                  // command pipe to the running service
 #include "Tray.h"                      // the tray icon, formerly ngtray.exe
 
@@ -866,6 +867,7 @@ namespace winrt::NeuralGuard::implementation
         GatesPanel().Visibility(mode == "active" ? Visibility::Visible : Visibility::Collapsed);
         loadingSettings_ = false;
         RefreshServiceStatus();
+        AboutVersion().Text(U8("v" + std::string(NG_VERSION)));
     }
 
     int MainWindow::ReadAutonomy()
@@ -1287,6 +1289,50 @@ namespace winrt::NeuralGuard::implementation
         UpdateMode();
         if (curView_ == L"live") RefreshCurrent();
         else if (curView_ == L"settings") RefreshServiceStatus();   // reflect install/remove
+
+        // Piggyback the periodic update check on this same once-a-second timer
+        // instead of running a second one. First check ~10s after launch (let
+        // the window paint before any network call); then once a day for as
+        // long as the tray stays up, which - since it now starts at login and
+        // stays running (see the Phase C/D tray merge) - is the only way an
+        // update would ever be noticed without the user remembering to check.
+        ++tickCount_;
+        constexpr int64_t kFirstCheck = 10;
+        constexpr int64_t kCheckInterval = 24LL * 60 * 60;
+        if (tickCount_ == kFirstCheck ||
+            (tickCount_ > kFirstCheck && (tickCount_ - kFirstCheck) % kCheckInterval == 0))
+            CheckForUpdateInBackground();
+    }
+
+    // Same network check OnCheckUpdate runs, just unattended. Updates the
+    // Settings panel regardless of which tab is showing (harmless if it's not
+    // visible right now), and balloons through the tray - but only once per
+    // newly-seen version, via meta('update_notified_version'), so a daily
+    // recheck doesn't nag about the same release the user already saw and
+    // hasn't gotten around to installing yet.
+    void MainWindow::CheckForUpdateInBackground()
+    {
+        auto dq = DispatcherQueue();
+        std::thread([this, dq]() {
+            ng::UpdateInfo info = ng::Updater().check();
+            if (info.error.empty() && info.available) {
+                dq.TryEnqueue([this, info]() {
+                    UpdateStatus().Text(to_hstring("Update available: " + info.latestVersion +
+                                                   "  (you have " + info.currentVersion + ")"));
+                    InstallUpdateBtn().IsEnabled(true);
+                    if (!info.notes.empty()) {
+                        UpdateNotesLink().NavigateUri(Windows::Foundation::Uri{ to_hstring(info.notes) });
+                        UpdateNotesLink().Visibility(Visibility::Visible);
+                    }
+                    if (MetaGet("update_notified_version", "") != info.latestVersion) {
+                        MetaSet("update_notified_version", info.latestVersion.c_str());
+                        hstring msg = U8("v" + info.latestVersion + " is available (you're on v" +
+                                         info.currentVersion + "). Open Settings to install.");
+                        ngtray::Balloon(L"NeuralGuard update available", std::wstring(msg.c_str()));
+                    }
+                });
+            }
+        }).detach();
     }
 
     void MainWindow::OnNavSelect(IInspectable const& sender, SelectionChangedEventArgs const&)
