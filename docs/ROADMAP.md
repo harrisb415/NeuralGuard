@@ -662,6 +662,47 @@ either path.
   running) → simulated the new restart step (`sc start`) → **`mode=learning`**,
   not idle - proving the fix without needing a full install/upgrade cycle.
 
+### Light mode ✅ DONE — shipped as v1.5.6
+Built on a `feature/light-mode` worktree, VM-only, with the user validating
+every screen (I can't see the elevated window - UIPI blocks a standard-integrity
+session from reading it). Merged to main once every view was confirmed.
+- **A — plumbing.** `App.xaml` no longer forces `RequestedTheme="Dark"` (an
+  app-level theme is fixed for the process lifetime and can never change). Theme
+  is applied per-window on the root element's `RequestedTheme`, driven by
+  `meta('theme')` = `dark` (default) | `light` | `system`. Settings → Appearance
+  radios. `ElementTheme::Default` = follow Windows, which is what makes 'system'
+  live-track the OS.
+- **B — token rewrite.** `NeuralGuardColors.xaml` became Dark/Light
+  `ThemeDictionaries`; every consumer moved `{StaticResource NG.Brush/Color.*}`
+  → `{ThemeResource ...}` (61 refs). StaticResource resolves once at parse time,
+  so it would have frozen the load-time theme - the reason Phase A alone could
+  only restyle system-drawn controls. Shape tokens stay StaticResource. Light is
+  hand-picked, not inverted (neon is invisible on white): accent → deep teal
+  `#00778F`, verdicts → darker saturated equivalents.
+- **C — caption buttons.** An `AppWindow` TitleBar API, outside the XAML resource
+  system, so they can't follow ThemeResource; re-applied per theme in
+  `ApplyCaptionColors`, re-run on `ActualThemeChanged`.
+- **The traps, both caught by the user's eyes, not the plan:**
+  - `SemBrush` (the IValueConverter I first made theme-aware in Phase B) turned
+    out to be **dead code** - unreferenced by any XAML. The verdict pills are
+    painted by `Row.cpp`, which bakes brushes in at construction (its own comment
+    explains why: verdict brushes live in a merged dictionary and
+    `ResourceDictionary.HasKey` doesn't search those). All of `Row`'s colours -
+    pills AND the plain/score text - were hardcoded dark, i.e. **invisible on
+    white**. Fixed by making `Row` theme-aware via a pushed flag
+    (`Row::SetLightTheme`, like the SemBrush pattern but on the file that's
+    actually used).
+  - Pills: first pass used one solid style for both themes ("one design is
+    better than two"); user rejected it for dark ("keep the neon pills"). Final:
+    `Row::PillBrushes` branches on theme - dark keeps the exact original neon
+    (dim tint + neon text + border, 6px radius), light gets solid saturated fill
+    + white text, fully rounded (`NG.Corner.Pill` themed 6/11). Yellow alone
+    takes dark text in light (white on it is ~1.9:1).
+- **Dark proven unchanged** by diffing all 28 `NG.Color.*` values + brush
+  literals + the relocated system-key overrides against the pre-branch original:
+  byte-identical. Only intentional dark change is MALICIOUS/DEMOTED → orange
+  (a semantic split from block, not a style change).
+
 ## Phase 3 — Habit scoring & autonomy
 
 **Goal:** fewer prompts, smarter defaults — still no ML.

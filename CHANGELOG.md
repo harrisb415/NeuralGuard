@@ -5,6 +5,19 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.6] - 2026-07-16
+
+### Added
+
+- **Light mode.** Settings → Appearance now offers **Dark** (the original
+  designed look, still the default), **Light**, or **Match Windows**, applied
+  live and remembered. Dark is unchanged - byte-for-byte the same colours,
+  including the neon verdict pills. Light isn't a mechanical inversion: neon on
+  white is illegible, so the accent and semantic colours are re-picked as deeper
+  saturated equivalents that keep their meaning at proper contrast, and the
+  verdict pills switch to a solid-fill style that reads on a light background.
+  "Match Windows" tracks the OS theme live.
+
 ## [1.5.5] - 2026-07-15
 
 ### Added
