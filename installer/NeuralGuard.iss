@@ -132,27 +132,75 @@ end;
 // elevated exe in the Startup folder does not reliably auto-elevate at logon -
 // this was shipped in 1.5.0/1.5.1 and the tray simply never appeared, silently,
 // with nothing logged (the process never got far enough to log anything). A
-// task registered with "run with highest privileges" (/rl highest) launches
-// elevated with NO interactive consent prompt at logon: the consent is
-// effectively given once, right now, by the person running this (elevated, for
-// a per-machine install) or already-elevated-equivalent Setup - not on every
-// login. /F overwrites a same-named task, so re-running install is idempotent.
+// task registered with "run with highest privileges" launches elevated with NO
+// interactive consent prompt at logon: the consent is effectively given once,
+// right now, by the person running this (elevated, for a per-machine install)
+// or already-elevated-equivalent Setup - not on every login.
+//
+// A full XML definition, not schtasks' plain /Create syntax, because two of
+// Task Scheduler's OWN defaults assume a short batch job, not a persistent tray
+// app, and plain /Create has no flags for either:
+//   - DisallowStartIfOnBatteries / StopIfGoingOnBatteries default TRUE - a
+//     laptop unplugging would silently kill the tray. (Found for real: a user
+//     noticed NeuralGuard vanish on battery and unchecked it by hand in Task
+//     Scheduler before this fix landed - this makes that manual fix permanent
+//     for every install instead.)
+//   - ExecutionTimeLimit defaults to 3 days - Task Scheduler would forcibly
+//     terminate the tray after that long, which any always-on machine hits.
+function StartupTaskXml(const ExePath: String): String;
+begin
+  // No explicit encoding attribute: SaveStringToFile below writes plain ANSI
+  // (system codepage) bytes, not UTF-8/UTF-16, and an omitted attribute makes
+  // XML parsers assume UTF-8 - byte-identical to ASCII for the plain install
+  // paths this ever actually contains, so this only matters for exotic
+  // non-ASCII usernames, and degrades to one mis-decoded character there
+  // rather than a parse failure.
+  Result :=
+    '<?xml version="1.0"?>' + #13#10 +
+    '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">' + #13#10 +
+    '  <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>' + #13#10 +
+    '  <Principals><Principal id="Author">' + #13#10 +
+    '    <LogonType>InteractiveToken</LogonType>' + #13#10 +
+    '    <RunLevel>HighestAvailable</RunLevel>' + #13#10 +
+    '  </Principal></Principals>' + #13#10 +
+    '  <Settings>' + #13#10 +
+    '    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>' + #13#10 +
+    '    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>' + #13#10 +
+    '    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>' + #13#10 +
+    '    <AllowHardTerminate>true</AllowHardTerminate>' + #13#10 +
+    '    <StartWhenAvailable>true</StartWhenAvailable>' + #13#10 +
+    '    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>' + #13#10 +
+    '    <IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>' + #13#10 +
+    '    <AllowStartOnDemand>true</AllowStartOnDemand>' + #13#10 +
+    '    <Enabled>true</Enabled>' + #13#10 +
+    '    <Hidden>false</Hidden>' + #13#10 +
+    '    <RunOnlyIfIdle>false</RunOnlyIfIdle>' + #13#10 +
+    '    <WakeToRun>false</WakeToRun>' + #13#10 +
+    '    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>' + #13#10 +
+    '    <Priority>7</Priority>' + #13#10 +
+    '  </Settings>' + #13#10 +
+    '  <Actions Context="Author"><Exec>' + #13#10 +
+    '    <Command>"' + ExePath + '"</Command>' + #13#10 +
+    '    <Arguments>--tray</Arguments>' + #13#10 +
+    '  </Exec></Actions>' + #13#10 +
+    '</Task>';
+end;
+
 procedure InstallStartupTask;
 var
   ResultCode: Integer;
-  exePath, taskParams: String;
+  exePath, xmlPath, taskParams: String;
 begin
   exePath := ExpandConstant('{app}\dashboard\NeuralGuard.exe');
-  // schtasks' /tr wants ONE token; since exePath itself contains spaces and an
-  // argument, it's wrapped in its own (escaped) quotes - the standard schtasks
-  // pattern for a quoted inner command.
-  taskParams := '/create /tn "NeuralGuard" /tr "\"' + exePath + '\" --tray"' +
-    ' /sc onlogon /rl highest /f';
-  // 'runas': registering an /rl highest task needs an elevated caller, and
-  // PrivilegesRequired=lowest means Setup itself might not be one (the "just me"
-  // choice). Matches how StopNeuralGuard elevates individually rather than
-  // requiring the whole installer to run as admin. If Setup is ALREADY elevated
-  // (the "for all users" choice), this doesn't add a second prompt.
+  xmlPath := ExpandConstant('{tmp}\NeuralGuard-task.xml');   // {tmp} is auto-cleaned after install
+  SaveStringToFile(xmlPath, StartupTaskXml(exePath), False);
+  taskParams := '/create /tn "NeuralGuard" /xml "' + xmlPath + '" /f';   // /F overwrites, so re-running install is idempotent
+  // 'runas': registering a HighestAvailable-run-level task needs an elevated
+  // caller, and PrivilegesRequired=lowest means Setup itself might not be one
+  // (the "just me" choice). Matches how StopNeuralGuard elevates individually
+  // rather than requiring the whole installer to run as admin. If Setup is
+  // ALREADY elevated (the "for all users" choice), this doesn't add a second
+  // prompt.
   ShellExec('runas', ExpandConstant('{sys}\schtasks.exe'), taskParams, '',
     SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;

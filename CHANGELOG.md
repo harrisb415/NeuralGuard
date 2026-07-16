@@ -5,6 +5,43 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.3] - 2026-07-15
+
+### Fixed
+
+- **NeuralGuard could stop protecting on battery.** Found and fixed by a user:
+  the login task 1.5.2 registers had Task Scheduler's own default "start only on
+  AC power" / "stop if going on batteries" settings active, which silently killed
+  the tray (and its prompt-handling) the moment a laptop was unplugged. The task
+  is now created from a full XML definition with both explicitly disabled.
+  Found in the same pass, not reported: Task Scheduler also defaults a new
+  task's execution time limit to **3 days** — fine for a batch job, fatal for a
+  persistent tray, which would have been force-terminated after that long on any
+  always-on machine. Now unlimited. Verified by registering the actual generated
+  task, confirming both settings in its own XML, then triggering it unelevated
+  and confirming it still launches fully elevated with zero UAC prompt.
+- **The dashboard couldn't be scrolled while Live auto-refreshed.** Every tick
+  replaced the list's entire data source, which resets a `ListView`'s scroll
+  position to the top — impossible to scroll down and actually read anything
+  before it snapped back. Scroll position (like the already-preserved row
+  selection) now survives the refresh.
+- **Live still visibly flickered every second even after the scroll fix.**
+  Replacing the data source, even with scroll position restored afterward,
+  tears down and recreates every visible row each tick. Live's feed is now
+  updated in place: new rows are inserted and stale ones trimmed without
+  touching anything that didn't change, so nothing flashes. (Caught a wrong
+  first attempt at this before it shipped — see `docs/ROADMAP.md` for what was
+  wrong with it.)
+
+### Removed
+
+- **The History tab.** It ran the exact same query as Live, filtered to denials
+  only — a tab named "History" reads as "everything that happened," and
+  showing only denials with no indication it was pre-filtered looked like a
+  bug ("why is it all red?"). Rather than keep two tabs, one an unlabeled
+  filtered view of the other, History now shows everything Live does — so
+  Live is the one feed, and the redundant tab is gone.
+
 ## [1.5.2] - 2026-07-15
 
 ### Fixed

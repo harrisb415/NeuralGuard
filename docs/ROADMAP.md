@@ -510,7 +510,7 @@ service is protection before/without a login. TinyWall's shape is the target.
 never own UI in the interactive desktop session — two processes (backend service +
 frontend tray/dashboard) is the real floor, not one.
 
-### Post-release fixes (found by actually using v1.5.0/1.5.1) ✅ DONE — shipped as v1.5.1, v1.5.2
+### Post-release fixes (found by actually using v1.5.0/1.5.1/1.5.2) ✅ DONE — shipped as v1.5.1, v1.5.2, v1.5.3
 Both found within hours, from the user installing on their physical host and
 reporting exactly what they saw — not from VM testing, which hadn't exercised
 either path.
@@ -564,6 +564,70 @@ either path.
   - `[InstallDelete]` now also removes the `{autostartup}\NeuralGuard.lnk` that
     1.5.0/1.5.1 installed, so upgrading can't leave the old (broken) shortcut
     sitting alongside the new task.
+- ✅ **1.5.3 — the 1.5.2 login task wasn't quite finished, and the Live/History
+  views had two real UX bugs**, all found the same day the user actually lived
+  with the app instead of just installing it.
+  - **Task Scheduler's own defaults undid half the point of a login task.** The
+    1.5.2 task had "start only on AC power" / "stop if going on batteries"
+    active — Task Scheduler's default for a new task, not something either
+    schtasks call had set. **The user found this themselves**: NeuralGuard
+    vanished on unplugging a laptop, traced it to the task, and unchecked it by
+    hand in Task Scheduler before this landed — this makes that fix permanent
+    for every install instead of a one-off manual correction on one machine.
+    `InstallStartupTask` now builds a full XML task definition (`schtasks
+    /create /xml`, since the plain-flag syntax has no switch for either
+    setting) with both explicitly disabled. **Found in the same pass, not
+    reported:** Task Scheduler also defaults `ExecutionTimeLimit` to 3 days —
+    harmless for a batch job, fatal for a persistent tray, which any always-on
+    machine would eventually hit. Set to unlimited (`PT0S`) in the same XML.
+    Verified on the host: registered the actual generated task, confirmed
+    `DisallowStartIfOnBatteries=false`, `StopIfGoingOnBatteries=false`,
+    `ExecutionTimeLimit=PT0S` in the task's own XML, then triggered it
+    unelevated while polling for `consent.exe` (never appeared) and confirmed
+    it survived an unelevated `Stop-Process` (genuinely elevated).
+  - **History was removed entirely.** It turned out to be running the exact
+    same query as Live, filtered to `verdict LIKE '%DROP%' OR verdict='BLOCK'`
+    — a tab just labeled "History" reads as "everything that happened," and
+    showing only denials with no on-screen indication that it was pre-filtered
+    looked like a bug ("why is it all red?"). Asked the user whether to keep
+    the filter and rename the tab, or drop the filter so History matches Live;
+    they chose the latter — which makes the two tabs byte-for-byte identical,
+    so the tab was deleted outright (nav item, view-tag branches, template/
+    column wiring) rather than kept as a redundant duplicate.
+  - **Live couldn't be scrolled while the 1-second auto-refresh was running.**
+    `RefreshCurrent()` replaced the ListView's entire `ItemsSource` every tick,
+    which resets a WinUI `ListView`'s scroll position to the top. First fix:
+    capture the `ScrollViewer`'s vertical offset before the rebuild and restore
+    it after (deferred one dispatcher tick so the restore doesn't race the
+    pending layout pass) — scrolling now held, but every tick still visibly
+    **flickered**, since replacing ItemsSource tears down and recreates every
+    realized row container even when most rows didn't change.
+  - **The flicker fix needed a second attempt.** First cut: keep a persistent
+    `IObservableVector` for Live and mutate it in place via a common-prefix/
+    common-suffix diff against last tick's row ids, instead of replacing
+    ItemsSource. This is wrong for this specific feed: the query is capped at
+    `LIMIT 300`, so once the feed is full, every new row at the front pushes
+    one off the back - which shifts every surviving row's *index* by however
+    many rows arrived. Index-aligned prefix/suffix comparison then matches
+    nothing most ticks, degenerating to "remove all, insert all" - worse than
+    the swap it was meant to replace. User-reported ("still flashing") caught
+    this before it shipped. Rewritten to match what the feed actually is: find
+    where last tick's first row reappears in this tick's results (that
+    position is exactly how many rows are new), verify the remainder still
+    lines up, and only insert the new rows at the front + trim any excess off
+    the tail - the true minimal edit for an append-at-front, trim-at-back
+    sliding window. Falls through to a full rebuild if the alignment check
+    fails (a filter or sort is active, or a burst exceeded the page size), so
+    it degrades to correct-but-unoptimized rather than wrong.
+  - Deployed and confirmed on the live host via direct exe/xbf/pri hot-swap
+    ahead of packaging a release — each of the three iterations (scroll only →
+    broken flicker fix → corrected flicker fix) was confirmed or refuted by the
+    user directly, since `NeuralGuard.exe` runs elevated and Windows' UIPI
+    blocks a standard-integrity automation session from reading OR controlling
+    an elevated window's content (confirmed directly: a computer-use screenshot
+    of the running window came back solid black despite a valid, visible,
+    non-minimized window rect - the same restriction that blocks driving Task
+    Manager or a UAC prompt).
 
 ## Phase 3 — Habit scoring & autonomy
 

@@ -101,6 +101,17 @@ namespace winrt::NeuralGuard::implementation
         bool navSyncing_{ false };                    // guard while clearing the other sidebar list's selection
         bool menuOpen_{ false };                      // a row context menu is open - pause the live refresh
         winrt::hstring filter_;                       // case-insensitive filter for the current table
+
+        // Live refreshes once a second; replacing ItemsSource every tick (every
+        // other view's approach) flickers, since a new ItemsSource is entirely new
+        // content to WinUI even when most rows didn't change. This collection
+        // persists across ticks and is mutated in place (see RefreshCurrent) -
+        // liveIds_ mirrors its contents by row id so the next tick can diff
+        // against it. liveItemsValid_ is cleared on every tab switch (ShowView),
+        // forcing one full rebuild before incremental updates resume.
+        winrt::Windows::Foundation::Collections::IObservableVector<winrt::Windows::Foundation::IInspectable> liveItems_{ nullptr };
+        std::vector<int64_t> liveIds_;
+        bool liveItemsValid_{ false };
     };
 }
 
