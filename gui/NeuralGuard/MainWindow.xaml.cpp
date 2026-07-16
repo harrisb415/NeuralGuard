@@ -1002,6 +1002,11 @@ namespace winrt::NeuralGuard::implementation
         auto root = Content().try_as<FrameworkElement>();
         const bool light = root && root.ActualTheme() == ElementTheme::Light;
 
+        // Row bakes its brushes at construction, so it needs the theme before any
+        // rows are built. (SemBrush is currently unreferenced by any XAML - the
+        // pills come from Row - but it's still registered in App.xaml, so keep it
+        // in sync rather than leave a stale trap for whoever wires it up.)
+        Row::SetLightTheme(light);
         SemBrush::SetLightTheme(light);
         ApplyCaptionColors(light);
 

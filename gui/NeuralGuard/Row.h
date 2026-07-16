@@ -8,6 +8,12 @@ namespace winrt::NeuralGuard::implementation
         Row(int64_t id, hstring const& c0, hstring const& c1, hstring const& c2,
             hstring const& c3, hstring const& c4);
 
+        // Rows bake their brushes at construction (see Row.cpp), so they can't
+        // follow ThemeResource. The window pushes its resolved ActualTheme here
+        // before building rows; only the plain-text colours depend on it - the
+        // pill fills are solid and read on either background.
+        static void SetLightTheme(bool light);
+
         int64_t Id() const { return m_id; }
         hstring C0() const { return m_c0; }
         hstring C1() const { return m_c1; }
