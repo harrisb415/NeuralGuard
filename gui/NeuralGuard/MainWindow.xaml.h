@@ -17,6 +17,9 @@ namespace winrt::NeuralGuard::implementation
                          winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const&);
         void OnRowRightTapped(winrt::Windows::Foundation::IInspectable const&,
                               winrt::Microsoft::UI::Xaml::Input::RightTappedRoutedEventArgs const&);
+        void OnRowDoubleTapped(winrt::Windows::Foundation::IInspectable const&,
+                               winrt::Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const&);
+        void OnAppDetailBack(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnHeaderTap(winrt::Windows::Foundation::IInspectable const&,
                          winrt::Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const&);
         void OnGripPressed(winrt::Windows::Foundation::IInspectable const&,
@@ -82,6 +85,10 @@ namespace winrt::NeuralGuard::implementation
         void SetW(int i, double px);
         void OnTick(winrt::Windows::Foundation::IInspectable const&, winrt::Windows::Foundation::IInspectable const&);
         void ShowView(winrt::hstring const& tag);
+        // Drill into a Per-app row's destination breakdown. `row` is the tapped
+        // apps row; its C3 is the app label and C0/C1/C2 the events/blocked/dests
+        // totals, reused in the detail header so they don't need re-querying.
+        void OpenAppDetail(winrt::NeuralGuard::Row const& row);
         void RefreshCurrent();
         void SetHeaders(winrt::hstring const& h0, winrt::hstring const& h1, winrt::hstring const& h2,
                         winrt::hstring const& h3, winrt::hstring const& h4);
@@ -97,6 +104,9 @@ namespace winrt::NeuralGuard::implementation
         winrt::Microsoft::UI::Xaml::DispatcherTimer timer_{ nullptr };
         winrt::Microsoft::UI::Xaml::DispatcherTimer toastTimer_{ nullptr };  // auto-dismiss the toast
         winrt::hstring curView_{ L"live" };
+        // app-detail view state: the app label being drilled into, plus the
+        // events/blocked/dests totals grabbed from the clicked row for the header.
+        winrt::hstring detailApp_, detailEvents_, detailBlocked_, detailDests_;
         winrt::NeuralGuard::Row ctxRow_{ nullptr };   // row the context menu acts on
         winrt::NeuralGuard::ColWidths colW_{ nullptr };  // shared, bindable column widths
         winrt::hstring baseHdr_[5];                   // header text without the sort arrow

@@ -522,6 +522,71 @@ namespace winrt::NeuralGuard::implementation
                                           U8(ng::Db::ColText(s, 3)), pname } });
             });
         }
+        else if (curView_ == L"app-detail")
+        {
+            // Destination breakdown for one app: filter the raw log to this app's
+            // image_id(s) (a signer can span several binaries) and group by
+            // destination + port + type. Fast via idx_flow_events_image_id.
+            SetHeaders(L"Destination", L"Port", L"Type", L"Events", L"Blocked");
+            std::string label = to_string(detailApp_);
+            if (ok)
+            {
+                sqlite3_stmt* s = nullptr;
+                if (sqlite3_prepare_v2(d.handle(),
+                        "SELECT COALESCE(fe.remote_domain, fe.remote_addr, '(none)'),"
+                        " COALESCE(fe.remote_port, 0), fe.protocol, fe.direction,"
+                        " COUNT(*), SUM(CASE WHEN fe.verdict LIKE '%DROP%' OR fe.verdict='BLOCK' THEN 1 ELSE 0 END)"
+                        " FROM flow_events fe"
+                        " WHERE fe.image_id IN (SELECT id FROM process_identity"
+                        "   WHERE COALESCE(signer, image_path, '(unknown)') = ?)"
+                        " GROUP BY 1, 2, fe.protocol, fe.direction"
+                        " ORDER BY 5 DESC LIMIT 500;", -1, &s, nullptr) == SQLITE_OK)
+                {
+                    sqlite3_bind_text(s, 1, label.c_str(), (int)label.size(), SQLITE_TRANSIENT);
+                    while (sqlite3_step(s) == SQLITE_ROW)
+                    {
+                        int proto = sqlite3_column_int(s, 2);
+                        std::string dir = ng::Db::ColText(s, 3);
+                        hstring pname = proto == 6 ? L"TCP" : proto == 17 ? L"UDP"
+                                      : proto == 1 ? L"ICMP" : proto == 58 ? L"ICMPv6"
+                                      : proto ? to_hstring(proto) : hstring(L"");
+                        // "TCP out" / "UDP in" / just the proto if direction unknown.
+                        hstring type = dir.empty() ? pname
+                                     : pname + L" " + U8(dir);
+                        rows.push_back({ 0, { U8(ng::Db::ColText(s, 0)), to_hstring(sqlite3_column_int(s, 1)),
+                                              type, to_hstring(sqlite3_column_int(s, 4)),
+                                              to_hstring(sqlite3_column_int(s, 5)) } });
+                    }
+                    sqlite3_finalize(s);
+                }
+            }
+
+            // Header: totals (reused from the clicked row) + trust signals.
+            std::string firstSeen, lastSeen;
+            if (ok) d.each_bind(
+                "SELECT MIN(ts_utc), MAX(ts_utc) FROM flow_events"
+                " WHERE image_id IN (SELECT id FROM process_identity"
+                "   WHERE COALESCE(signer, image_path, '(unknown)') = ?);",
+                label, [&](sqlite3_stmt* s) {
+                std::string mn = ng::Db::ColText(s, 0), mx = ng::Db::ColText(s, 1);
+                firstSeen = mn.size() >= 19 ? mn.substr(11, 8) : mn;
+                lastSeen  = mx.size() >= 19 ? mx.substr(11, 8) : mx;
+            });
+            int habits = 0, mlflags = 0;
+            if (ok) d.each_bind("SELECT COUNT(*) FROM habits WHERE process_label = ?;", label,
+                                [&](sqlite3_stmt* s) { habits = sqlite3_column_int(s, 0); });
+            if (ok) d.each_bind(
+                "SELECT COUNT(*) FROM ml_flags WHERE app_path IN (SELECT image_path FROM process_identity"
+                "  WHERE COALESCE(signer, image_path, '(unknown)') = ?);", label,
+                [&](sqlite3_stmt* s) { mlflags = sqlite3_column_int(s, 0); });
+
+            AppDetailTotals().Text(U8(to_string(detailEvents_) + " events · " + to_string(detailBlocked_) +
+                                      " blocked · " + to_string(detailDests_) + " destinations" +
+                                      (lastSeen.empty() ? "" : "  ·  last seen " + lastSeen) +
+                                      "   (last 14 days)"));
+            AppDetailTrust().Text(U8("Learned habits: " + std::to_string(habits) +
+                                     "    ML flags: " + (mlflags ? std::to_string(mlflags) : std::string("none"))));
+        }
         // (the Settings and Digest views use their own panels, not the data table)
 
         if (!filter_.empty())
@@ -704,7 +769,14 @@ namespace winrt::NeuralGuard::implementation
         else if (tag == L"feedback") title = L"Feedback";
         else if (tag == L"digest") title = L"Digest";
         else if (tag == L"settings") title = L"Settings";
+        else if (tag == L"app-detail") title = detailApp_;   // the drilled-into app
         ViewTitle().Text(title);
+
+        // app-detail is a sub-view of Per-app: its back button + trust card show
+        // only here; every other view collapses them.
+        bool appDetail = (tag == L"app-detail");
+        AppDetailBack().Visibility(appDetail ? Visibility::Visible : Visibility::Collapsed);
+        AppDetailCard().Visibility(appDetail ? Visibility::Visible : Visibility::Collapsed);
 
         bool settings = (tag == L"settings");
         bool digest = (tag == L"digest");
@@ -730,6 +802,7 @@ namespace winrt::NeuralGuard::implementation
             else if (tag == L"feedback") tpl = L"TplFeedback";
             else if (tag == L"apps") tpl = L"TplPerApp";
             else if (tag == L"flows") tpl = L"TplFlows";
+            // app-detail uses the plain generic template (destination breakdown).
             auto res = ContentRoot().Resources();
             if (res.HasKey(box_value(tpl)))
                 DataList().ItemTemplate(res.Lookup(box_value(tpl)).as<winrt::Microsoft::UI::Xaml::DataTemplate>());
@@ -745,6 +818,7 @@ namespace winrt::NeuralGuard::implementation
             else if (tag == L"rules")                SetCols(120, 90, 120, -1, 0);
             else if (tag == L"inbound")              SetCols(110, 80, 90, -1, 150);
             else if (tag == L"habits")               SetCols(110, 90, -1, 260, 0);
+            else if (tag == L"app-detail")           SetCols(-1, 80, 130, 110, 90);
             else                                     SetCols(130, 128, -1, 210, 84);
 
             // Flows right-aligns its two numeric headers (Anomaly, P(malicious)) to
@@ -1520,6 +1594,12 @@ namespace winrt::NeuralGuard::implementation
             if (id == 0) return;
             add(L"Remove this flag", [this, id] { RemoveFlag(id); RefreshCurrent(); });
         }
+        else if (curView_ == L"apps")
+        {
+            auto r = ctxRow_;
+            if (r.C3().empty()) return;   // the "(no rows yet)" placeholder
+            add(L"View destinations", [this, r] { OpenAppDetail(r); });
+        }
         if (menu.Items().Size() == 0) return;
 
         DataList().SelectedItem(row);   // highlight the row the menu acts on
@@ -1529,6 +1609,39 @@ namespace winrt::NeuralGuard::implementation
         FlyoutShowOptions opt;
         opt.Position(e.GetPosition(container));
         menu.ShowAt(container, opt);
+    }
+
+    // Double-click a Per-app row = the same drill-in as the right-click menu
+    // item, as a shortcut. Discoverability lives in the menu; this is the accel.
+    void MainWindow::OnRowDoubleTapped(IInspectable const&, DoubleTappedRoutedEventArgs const& e)
+    {
+        if (curView_ != L"apps") return;
+        DependencyObject src = e.OriginalSource().try_as<DependencyObject>();
+        ListViewItem container{ nullptr };
+        while (src)
+        {
+            if (auto lvi = src.try_as<ListViewItem>()) { container = lvi; break; }
+            src = VisualTreeHelper::GetParent(src);
+        }
+        if (!container) return;
+        auto row = DataList().ItemFromContainer(container).try_as<NeuralGuard::Row>();
+        if (row && !row.C3().empty()) OpenAppDetail(row);
+    }
+
+    void MainWindow::OnAppDetailBack(IInspectable const&, RoutedEventArgs const&)
+    {
+        ShowView(L"apps");
+    }
+
+    // Stash the clicked row's app label + its totals (so the header needs no
+    // re-query), then switch to the detail view which renders the breakdown.
+    void MainWindow::OpenAppDetail(NeuralGuard::Row const& row)
+    {
+        detailApp_     = row.C3();   // Application column
+        detailEvents_  = row.C0();
+        detailBlocked_ = row.C1();
+        detailDests_   = row.C2();
+        ShowView(L"app-detail");
     }
 
     void MainWindow::DelRule(int64_t id)

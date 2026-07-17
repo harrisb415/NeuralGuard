@@ -31,6 +31,17 @@ public:
         sqlite3_finalize(s);
     }
 
+    // Same, with one bound text parameter (:1) - so an app label with a quote in
+    // it can't break the SQL. Used by the Per-app drill-down.
+    void each_bind(const char* sql, const std::string& p1,
+                   const std::function<void(sqlite3_stmt*)>& fn) {
+        sqlite3_stmt* s = nullptr;
+        if (sqlite3_prepare_v2(db_, sql, -1, &s, nullptr) != SQLITE_OK) return;
+        sqlite3_bind_text(s, 1, p1.c_str(), (int)p1.size(), SQLITE_TRANSIENT);
+        while (sqlite3_step(s) == SQLITE_ROW) fn(s);
+        sqlite3_finalize(s);
+    }
+
     // Convenience: text of a single-value query (e.g. meta lookups).
     std::string scalar(const char* sql) {
         std::string out;

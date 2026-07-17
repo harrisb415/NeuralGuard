@@ -40,6 +40,10 @@ const char* kSchema =
     // process_identity.id, which is already a primary-key lookup, so a second
     // index there would never be used.
     "CREATE INDEX IF NOT EXISTS idx_flow_events_ts ON flow_events(ts_utc);"
+    // Added for the Per-app drill-down, which filters the raw log to one app's
+    // image_id(s) to break down its destinations. Nothing filtered by image_id
+    // before, which is why this wasn't here until the drill-down needed it.
+    "CREATE INDEX IF NOT EXISTS idx_flow_events_image_id ON flow_events(image_id);"
     // The learned baseline: one row per (process, destination, port, protocol)
     // with a decaying count and time-of-day histograms.
     "CREATE TABLE IF NOT EXISTS habits("

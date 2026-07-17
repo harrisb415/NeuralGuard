@@ -5,6 +5,18 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.8] - 2026-07-17
+
+### Added
+
+- **Per-app drill-down.** Right-click an app in the Per-app view (or double-click
+  it) and choose **View destinations** to see exactly where that app connects: a
+  table of destination, port, type (e.g. "TCP out"), events, and blocked, sorted
+  by activity - plus a header panel with the app's totals and trust signals
+  (learned habits, any ML flags). A back button returns to the app list. It reads
+  the raw log filtered to that app (indexed on `image_id`), so it stays fast as
+  the log grows, and reflects the retained 14-day window like the rest of the app.
+
 ## [1.5.7] - 2026-07-17
 
 ### Changed

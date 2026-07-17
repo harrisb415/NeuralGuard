@@ -269,8 +269,14 @@
                     </DataTemplate>
                 </Grid.Resources>
                 <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto">
-                    <TextBlock Grid.Column="0" x:Name="ViewTitle" Text="Live" FontSize="26" FontWeight="SemiBold"
-                               VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                        <!-- Back to Per-app; only shown in the app-detail view. -->
+                        <Button x:Name="AppDetailBack" Content="&#x2190; Per-app" Visibility="Collapsed"
+                                Click="OnAppDetailBack" Style="{StaticResource NG.Button.Ghost}"
+                                VerticalAlignment="Center"/>
+                        <TextBlock x:Name="ViewTitle" Text="Live" FontSize="26" FontWeight="SemiBold"
+                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
                     <StackPanel Grid.Column="1" x:Name="RulesTools" Orientation="Horizontal" Spacing="8"
                                 VerticalAlignment="Center" Margin="0,0,12,0" Visibility="Collapsed">
                         <Button Content="Export" Click="OnExportRules"/>
@@ -295,8 +301,20 @@
                         Background="{ThemeResource NG.Brush.BG.Surface}"
                         BorderBrush="{ThemeResource NG.Brush.Border.Subtle}"
                         BorderThickness="1" CornerRadius="12">
-                    <Grid RowDefinitions="Auto,*">
-                        <Grid Grid.Row="0" x:Name="HeaderRow" Height="46" Padding="20,0"
+                    <Grid RowDefinitions="Auto,Auto,*">
+                        <!-- Per-app drill-down trust panel: shown only in the
+                             app-detail view, filled by RefreshCurrent. -->
+                        <Border Grid.Row="0" x:Name="AppDetailCard" Visibility="Collapsed"
+                                Padding="20,14" BorderThickness="0,0,0,1"
+                                BorderBrush="{ThemeResource NG.Brush.Border.Subtle}">
+                            <StackPanel Spacing="4">
+                                <TextBlock x:Name="AppDetailTotals" FontSize="13"
+                                           Foreground="{ThemeResource NG.Brush.Text.Primary}"/>
+                                <TextBlock x:Name="AppDetailTrust" FontSize="12.5"
+                                           Foreground="{ThemeResource NG.Brush.Text.Secondary}"/>
+                            </StackPanel>
+                        </Border>
+                        <Grid Grid.Row="1" x:Name="HeaderRow" Height="46" Padding="20,0"
                               BorderBrush="{ThemeResource NG.Brush.Border.Subtle}" BorderThickness="0,0,0,1">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition x:Name="HCol0" Width="140"/>
@@ -316,8 +334,9 @@
                             <Border Grid.Column="4" Background="Transparent" Tag="4" Tapped="OnHeaderTap">
                                 <TextBlock x:Name="H4" VerticalAlignment="Center" Style="{StaticResource NG.Text.SectionHeader}"/></Border>
                         </Grid>
-                        <ListView Grid.Row="1" x:Name="DataList" SelectionMode="Single" Padding="0"
+                        <ListView Grid.Row="2" x:Name="DataList" SelectionMode="Single" Padding="0"
                                   IsRightTapEnabled="True" RightTapped="OnRowRightTapped"
+                                  IsDoubleTapEnabled="True" DoubleTapped="OnRowDoubleTapped"
                                   ContainerContentChanging="OnContainerChanging"
                                   ItemTemplate="{StaticResource TplGeneric}"
                                   Background="Transparent"
