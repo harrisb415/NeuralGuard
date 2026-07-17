@@ -5,6 +5,27 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.7] - 2026-07-17
+
+### Changed
+
+- **The raw event log no longer balloons.** On a chatty machine `flow_events`
+  grew ~164k rows/day - almost all of it near-identical repeats (a stuck retry
+  loop, mDNS/SSDP/NetBIOS multicast) - and it was unbounded, so it hit 600k
+  rows / 100MB in under four days and made the Per-app view take ~2s to load.
+  Rapid repeats of the same flow+verdict are now collapsed to one logged row
+  per 10 seconds (a 10-20x cut on flooding sources); genuinely distinct
+  connections are unaffected. This only touches the raw log - habit learning
+  and the enforce baseline are unchanged. A side effect worth knowing: the
+  "Events" tallies now count coalesced activity rather than raw packets, which
+  for a firewall dashboard is the more useful number.
+
+### Added
+
+- Retention on the raw log: it's trimmed to 14 days automatically, and
+  `ngd events purge [db] [days]` cleans up on demand (with a VACUUM to reclaim
+  disk). Plus an index so those time-based trims stay cheap.
+
 ## [1.5.6] - 2026-07-16
 
 ### Added
