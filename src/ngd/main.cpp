@@ -125,6 +125,9 @@ void PrintUsage() {
         "                                No argument just reports it alongside what's running.\n"
         "  ngd baseline [db]             Print the stable permits enforce would install\n"
         "                                (read-only; shows Phase 4d demotion effects).\n"
+        "  ngd events purge [db] [days]  Trim the raw event log to the last [days] (default\n"
+        "                                14) and reclaim disk. Done automatically at startup;\n"
+        "                                this is for shrinking the DB on demand.\n"
         "  ngd features [db] [seconds]   Collect completed-flow features (Phase 4 ML data).\n"
         "  ngd features on|off [db]      Toggle feature archival by the enforce/record daemon.\n"
         "  ngd features mode [val] [db]  Show/set ML scoring: shadow (default) | active | off.\n"
@@ -985,6 +988,23 @@ int main(int argc, char** argv) {
     // `features` has sub-subcommands (dump/purge), so handle it before the flat
     // mode parser below treats argv[2] as a db path.
     if (argc >= 2 && strcmp(argv[1], "features") == 0) return RunFeatures(argc, argv);
+
+    // `events purge [db] [days]` - manually trim the raw flow_events log. The
+    // record/enforce daemons purge on startup automatically; this is for on-demand
+    // cleanup (e.g. to shrink the DB now rather than at the next restart). DB-only,
+    // no admin. `days` defaults to the built-in retention window.
+    if (argc >= 3 && strcmp(argv[1], "events") == 0 && strcmp(argv[2], "purge") == 0) {
+        const char* dbPath = argc >= 4 ? argv[3] : "ngpolicy.db";
+        int days = argc >= 5 ? atoi(argv[4]) : ng::kFlowEventsRetentionDays;
+        ng::Db db;
+        if (!db.open(dbPath)) return 1;
+        long long n = db.purgeFlowEvents(days);
+        if (n < 0) { fprintf(stderr, "purge failed\n"); return 1; }
+        printf("purged %lld flow_events row(s) older than %d days.\n", n, days);
+        // Reclaim the freed pages so the file actually shrinks on disk.
+        sqlite3_exec(db.handle(), "VACUUM;", nullptr, nullptr, nullptr);
+        return 0;
+    }
 
     // `update` needs no db and no admin (the installer elevates its own steps).
     if (argc >= 2 && strcmp(argv[1], "update") == 0) return RunUpdate(argc, argv);

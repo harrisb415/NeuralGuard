@@ -158,26 +158,37 @@ void EnforceDaemon::recordEvent(const void* evp) {
     const char* dirStr = (dir == ngwfp::Dir::In) ? "in"
                        : (dir == ngwfp::Dir::Out) ? "out" : nullptr;
 
+    // Same rapid-repeat suppression as Recorder::handleEvent - keyed on the flow
+    // identity + verdict. Gates only the raw-log insert; the block-notify-retry
+    // and inbound-review logic below acts per event regardless.
+    std::string dkey = std::string(verdict) + "|" + local + ":" +
+                       std::to_string(hasLPort ? h->localPort : 0) + "|" + remote + ":" +
+                       std::to_string(hasRPort ? h->remotePort : 0) + "|" +
+                       std::to_string(hasProto ? h->ipProtocol : 0);
+
     {
         std::lock_guard<std::mutex> lk(db_.mutex());
-        sqlite3_stmt* ins = static_cast<sqlite3_stmt*>(insStmt_);
-        if (!ins) return;
-        sqlite3_reset(ins);
-        sqlite3_clear_bindings(ins);
-        bindText(ins, 1, ts);
-        bindText(ins, 2, verdict);
-        if (hasProto) sqlite3_bind_int(ins, 3, h->ipProtocol); else sqlite3_bind_null(ins, 3);
-        bindText(ins, 4, local);
-        if (hasLPort) sqlite3_bind_int(ins, 5, h->localPort); else sqlite3_bind_null(ins, 5);
-        bindText(ins, 6, remote);
-        if (hasRPort) sqlite3_bind_int(ins, 7, h->remotePort); else sqlite3_bind_null(ins, 7);
-        bindText(ins, 8, app);
-        bindText(ins, 9, sid);
-        if (idn.id >= 0) sqlite3_bind_int64(ins, 10, idn.id); else sqlite3_bind_null(ins, 10);
-        if (domain.empty()) sqlite3_bind_null(ins, 11); else bindText(ins, 11, domain);
-        if (dirStr) sqlite3_bind_text(ins, 12, dirStr, -1, SQLITE_STATIC);
-        else        sqlite3_bind_null(ins, 12);
-        sqlite3_step(ins);
+        if (coalescer_.shouldRecord(dkey, GetTickCount64())) {
+            sqlite3_stmt* ins = static_cast<sqlite3_stmt*>(insStmt_);
+            if (ins) {
+                sqlite3_reset(ins);
+                sqlite3_clear_bindings(ins);
+                bindText(ins, 1, ts);
+                bindText(ins, 2, verdict);
+                if (hasProto) sqlite3_bind_int(ins, 3, h->ipProtocol); else sqlite3_bind_null(ins, 3);
+                bindText(ins, 4, local);
+                if (hasLPort) sqlite3_bind_int(ins, 5, h->localPort); else sqlite3_bind_null(ins, 5);
+                bindText(ins, 6, remote);
+                if (hasRPort) sqlite3_bind_int(ins, 7, h->remotePort); else sqlite3_bind_null(ins, 7);
+                bindText(ins, 8, app);
+                bindText(ins, 9, sid);
+                if (idn.id >= 0) sqlite3_bind_int64(ins, 10, idn.id); else sqlite3_bind_null(ins, 10);
+                if (domain.empty()) sqlite3_bind_null(ins, 11); else bindText(ins, 11, domain);
+                if (dirStr) sqlite3_bind_text(ins, 12, dirStr, -1, SQLITE_STATIC);
+                else        sqlite3_bind_null(ins, 12);
+                sqlite3_step(ins);
+            }
+        }
     }
 
     const bool isLoopback = remote.rfind("127.", 0) == 0 || remote == "::1" ||
@@ -487,6 +498,13 @@ void EnforceDaemon::stop() {
 
 bool EnforceDaemon::run(int seconds) {
     if (!enf_.open()) return false;
+
+    // Enforce mode also records the live feed, so it too bounds the raw log on
+    // startup. The baseline query below reads flow_events, so this also caps how
+    // far back trust is computed - an app must have connected within the window.
+    long long purged = db_.purgeFlowEvents(ng::kFlowEventsRetentionDays);
+    if (purged > 0)
+        printf("purged %lld flow_events row(s) older than %d days\n", purged, ng::kFlowEventsRetentionDays);
 
     // Prepare the flow_events insert so enforcement also records the live feed.
     sqlite3_stmt* ins = nullptr;

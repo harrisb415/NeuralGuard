@@ -1,4 +1,5 @@
 #include "core/db.h"
+#include "core/util.h"   // IsoTime + FILETIME, for the retention cutoff
 
 #include <cstdio>
 
@@ -33,6 +34,12 @@ const char* kSchema =
     "  remote_domain TEXT,"  // resolved via DNS-client ETW, NULL if unknown
     "  direction     TEXT);" // 'out' (ALE connect) | 'in' (ALE recv-accept) | NULL
                              // (non-ALE event). From the event's layer, not a guess.
+    // The one index flow_events needs. It accelerates the two things that scan by
+    // time: the retention purge (WHERE ts_utc < cutoff) and the Per-app view's
+    // recent-window filter. No image_id index - every query joins fe.image_id to
+    // process_identity.id, which is already a primary-key lookup, so a second
+    // index there would never be used.
+    "CREATE INDEX IF NOT EXISTS idx_flow_events_ts ON flow_events(ts_utc);"
     // The learned baseline: one row per (process, destination, port, protocol)
     // with a decaying count and time-of-day histograms.
     "CREATE TABLE IF NOT EXISTS habits("
@@ -221,6 +228,28 @@ std::string Db::meta(const char* key, const char* dflt) {
         sqlite3_finalize(s);
     }
     return out;
+}
+
+long long Db::purgeFlowEvents(int days) {
+    // Cutoff = now - days, formatted exactly like ts_utc (util::IsoTime), so the
+    // string comparison below is a valid time comparison. Mirrors the pattern in
+    // PurgeFlowFeatures (flowstats.cpp).
+    FILETIME ft; GetSystemTimeAsFileTime(&ft);
+    ULARGE_INTEGER u; u.LowPart = ft.dwLowDateTime; u.HighPart = ft.dwHighDateTime;
+    u.QuadPart -= (ULONGLONG)days * 24 * 3600 * 10000000ULL;
+    FILETIME cf; cf.dwLowDateTime = u.LowPart; cf.dwHighDateTime = u.HighPart;
+    std::string cutoff = util::IsoTime(cf);
+
+    std::lock_guard<std::mutex> lk(mutex_);
+    sqlite3_stmt* s = nullptr;
+    if (sqlite3_prepare_v2(db_, "DELETE FROM flow_events WHERE ts_utc < ?;",
+                           -1, &s, nullptr) != SQLITE_OK)
+        return -1;
+    bindText(s, 1, cutoff);
+    int rc = sqlite3_step(s);
+    sqlite3_finalize(s);
+    if (rc != SQLITE_DONE) return -1;
+    return sqlite3_changes(db_);
 }
 
 void Db::setMeta(const char* key, const std::string& val) {

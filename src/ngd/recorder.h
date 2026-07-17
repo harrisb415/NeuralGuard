@@ -2,6 +2,8 @@
 // writes each event (attributed via IdentityResolver) into the database.
 #pragma once
 
+#include "ngd/coalesce.h"
+
 #include <atomic>
 
 namespace ng {
@@ -35,6 +37,7 @@ private:
     // = unresolved). See ngwfp::ResolveAleLayers / DirectionOf.
     unsigned short aleConnV4_ = 0xFFFF, aleConnV6_ = 0xFFFF,
                    aleAcceptV4_ = 0xFFFF, aleAcceptV6_ = 0xFFFF;
+    EventCoalescer coalescer_;   // suppress rapid identical repeats in the raw log
 };
 
 }  // namespace ng

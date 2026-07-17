@@ -10,6 +10,15 @@
 
 namespace ng {
 
+// flow_events grows fast - it's one row per WFP net event, system-wide, and a
+// chatty machine produces >100k/day. Left unbounded it reaches millions of rows
+// and gigabytes, which slows every scan (Per-app, the enforce baseline) and the
+// Live view's own writer. This caps the raw log's age. 14 days keeps enough
+// history for the baseline (an app must connect >=3 times within the window to
+// stay auto-permitted) and weekly patterns, while bounding steady-state size.
+// The distinct ML-feature table (flow_features) has its own 30-day retention.
+constexpr int kFlowEventsRetentionDays = 14;
+
 // Bind a std::string to a statement parameter (copying, so temporaries are safe).
 inline void bindText(sqlite3_stmt* s, int i, const std::string& v) {
     sqlite3_bind_text(s, i, v.c_str(), (int)v.size(), SQLITE_TRANSIENT);
@@ -30,6 +39,11 @@ public:
     // two statements; this is the one implementation.
     std::string meta(const char* key, const char* dflt = "");
     void setMeta(const char* key, const std::string& val);
+
+    // Delete flow_events older than `days`. Returns rows removed (-1 on error).
+    // Cheap thanks to idx_flow_events_ts. Called at record/enforce startup and
+    // exposed via `ngd events purge`.
+    long long purgeFlowEvents(int days);
 
 private:
     sqlite3* db_ = nullptr;
