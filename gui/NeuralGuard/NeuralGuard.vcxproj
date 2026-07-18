@@ -148,11 +148,18 @@
     <ClInclude Include="InsightsView.xaml.h">
       <DependentUpon>InsightsView.xaml</DependentUpon>
     </ClInclude>
+    <ClInclude Include="DataTable.xaml.h">
+      <DependentUpon>DataTable.xaml</DependentUpon>
+    </ClInclude>
+    <ClInclude Include="RowData.h" />
   </ItemGroup>
   <ItemGroup>
     <ApplicationDefinition Include="App.xaml" />
     <Page Include="MainWindow.xaml" />
     <Page Include="InsightsView.xaml">
+      <SubType>Designer</SubType>
+    </Page>
+    <Page Include="DataTable.xaml">
       <SubType>Designer</SubType>
     </Page>
     <Page Include="Themes\NeuralGuardColors.xaml" />
@@ -170,12 +177,14 @@
     </ClCompile>
     <!-- MainWindow's implementation is split by concern across these files; only
          MainWindow.xaml.cpp pulls in the generated MainWindow.g.cpp glue. -->
-    <ClCompile Include="MainWindow.Table.cpp" />
     <ClCompile Include="MainWindow.Views.cpp" />
     <ClCompile Include="MainWindow.RowActions.cpp" />
     <ClCompile Include="MainWindow.Settings.cpp" />
     <ClCompile Include="InsightsView.xaml.cpp">
       <DependentUpon>InsightsView.xaml</DependentUpon>
+    </ClCompile>
+    <ClCompile Include="DataTable.xaml.cpp">
+      <DependentUpon>DataTable.xaml</DependentUpon>
     </ClCompile>
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
     <ClCompile Include="deps\sqlite3.c">
@@ -231,6 +240,10 @@
     <Midl Include="InsightsView.idl">
       <SubType>Code</SubType>
       <DependentUpon>InsightsView.xaml</DependentUpon>
+    </Midl>
+    <Midl Include="DataTable.idl">
+      <SubType>Code</SubType>
+      <DependentUpon>DataTable.xaml</DependentUpon>
     </Midl>
     <Midl Include="Row.idl">
       <SubType>Code</SubType>

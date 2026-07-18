@@ -101,19 +101,11 @@ namespace winrt::NeuralGuard::implementation
                InfoBarSeverity::Success);
     }
 
-    void MainWindow::OnRowRightTapped(IInspectable const&, RightTappedRoutedEventArgs const& e)
+    // Raised by the DataTable control with the clicked row, its container (menu
+    // anchor) and the pointer position. The control already selected the row; we
+    // build the per-view context menu and show it.
+    void MainWindow::ShowRowMenu(NeuralGuard::Row const& row, FrameworkElement const& anchor, Point const& pos)
     {
-        // Find the ListViewItem (and its Row) under the pointer.
-        DependencyObject src = e.OriginalSource().try_as<DependencyObject>();
-        ListViewItem container{ nullptr };
-        while (src)
-        {
-            if (auto lvi = src.try_as<ListViewItem>()) { container = lvi; break; }
-            src = VisualTreeHelper::GetParent(src);
-        }
-        if (!container) return;
-        auto row = DataList().ItemFromContainer(container).try_as<NeuralGuard::Row>();
-        if (!row) return;   // per-view branches below decide what (if anything) applies
         ctxRow_ = row;
 
         MenuFlyout menu;
@@ -172,30 +164,19 @@ namespace winrt::NeuralGuard::implementation
         }
         if (menu.Items().Size() == 0) return;
 
-        DataList().SelectedItem(row);   // highlight the row the menu acts on
         menuOpen_ = true;               // pause the live refresh so the menu isn't torn down
         menu.Closed([this](auto&&, auto&&) { menuOpen_ = false; });
 
         FlyoutShowOptions opt;
-        opt.Position(e.GetPosition(container));
-        menu.ShowAt(container, opt);
+        opt.Position(pos);
+        menu.ShowAt(anchor, opt);
     }
 
-    // Double-click a Per-app row = the same drill-in as the right-click menu
-    // item, as a shortcut. Discoverability lives in the menu; this is the accel.
-    void MainWindow::OnRowDoubleTapped(IInspectable const&, DoubleTappedRoutedEventArgs const& e)
+    // Double-click a Per-app row = the same drill-in as the right-click "View
+    // destinations" item, as a shortcut. Raised by the DataTable control.
+    void MainWindow::OnRowInvoked(NeuralGuard::Row const& row)
     {
-        if (curView_ != L"apps") return;
-        DependencyObject src = e.OriginalSource().try_as<DependencyObject>();
-        ListViewItem container{ nullptr };
-        while (src)
-        {
-            if (auto lvi = src.try_as<ListViewItem>()) { container = lvi; break; }
-            src = VisualTreeHelper::GetParent(src);
-        }
-        if (!container) return;
-        auto row = DataList().ItemFromContainer(container).try_as<NeuralGuard::Row>();
-        if (row && !row.C3().empty()) OpenAppDetail(row);
+        if (curView_ == L"apps" && !row.C3().empty()) OpenAppDetail(row);
     }
 
     void MainWindow::OnAppDetailBack(IInspectable const&, RoutedEventArgs const&)

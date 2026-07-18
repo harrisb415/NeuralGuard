@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="NeuralGuard.DataTable"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:NeuralGuard"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <!-- Per-view row templates. All share the same 5-column Grid so the
+             resizable/sortable header (OnContainerChanging) keeps working; they
+             differ only in which cells render as neon pill badges. SetView assigns
+             DataList.ItemTemplate by the current view. Pills bind baked brushes with
+             x:Bind (Row bakes them in its ctor). -->
+        <DataTemplate x:Key="TplGeneric" x:DataType="local:Row">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110"/><ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="240"/><ColumnDefinition Width="320"/>
+                    <ColumnDefinition Width="90"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" HorizontalAlignment="Left" VerticalAlignment="Center" CornerRadius="{ThemeResource NG.Corner.Pill}" BorderThickness="1" Padding="11,4" Margin="0,0,8,0"
+                        Background="{x:Bind C0Bg}" BorderBrush="{x:Bind C0Bd}">
+                    <TextBlock Text="{x:Bind C0}" FontFamily="Consolas" FontSize="11" FontWeight="Bold" CharacterSpacing="60"
+                               Foreground="{x:Bind C0Fg}"/></Border>
+                <TextBlock Grid.Column="1" Text="{x:Bind C1}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="2" Text="{x:Bind C2}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="3" Text="{x:Bind C3}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="4" Text="{x:Bind C4}" TextTrimming="CharacterEllipsis"/>
+            </Grid>
+        </DataTemplate>
+        <!-- Live / Flags: verdict-or-kind pill in column 1 -->
+        <DataTemplate x:Key="TplLive" x:DataType="local:Row">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110"/><ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="240"/><ColumnDefinition Width="320"/>
+                    <ColumnDefinition Width="90"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{x:Bind C0}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <Border Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center" CornerRadius="{ThemeResource NG.Corner.Pill}" BorderThickness="1" Padding="11,4" Margin="0,0,8,0"
+                        Background="{x:Bind C1Bg}" BorderBrush="{x:Bind C1Bd}">
+                    <TextBlock Text="{x:Bind C1}" FontFamily="Consolas" FontSize="11" FontWeight="Bold" CharacterSpacing="60"
+                               Foreground="{x:Bind C1Fg}"/></Border>
+                <TextBlock Grid.Column="2" Text="{x:Bind C2}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="3" Text="{x:Bind C3}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="4" Text="{x:Bind C4}" TextTrimming="CharacterEllipsis"/>
+            </Grid>
+        </DataTemplate>
+        <!-- Baseline: state pill in column 2 -->
+        <DataTemplate x:Key="TplBaseline" x:DataType="local:Row">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110"/><ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="240"/><ColumnDefinition Width="320"/>
+                    <ColumnDefinition Width="90"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{x:Bind C0}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="1" Text="{x:Bind C1}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <Border Grid.Column="2" HorizontalAlignment="Left" VerticalAlignment="Center" CornerRadius="{ThemeResource NG.Corner.Pill}" BorderThickness="1" Padding="11,4" Margin="0,0,8,0"
+                        Background="{x:Bind C2Bg}" BorderBrush="{x:Bind C2Bd}">
+                    <TextBlock Text="{x:Bind C2}" FontFamily="Consolas" FontSize="11" FontWeight="Bold" CharacterSpacing="60"
+                               Foreground="{x:Bind C2Fg}"/></Border>
+                <TextBlock Grid.Column="3" Text="{x:Bind C3}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="4" Text="{x:Bind C4}" TextTrimming="CharacterEllipsis"/>
+            </Grid>
+        </DataTemplate>
+        <!-- Feedback: decision pill (col1) + label pill (col2) -->
+        <DataTemplate x:Key="TplFeedback" x:DataType="local:Row">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110"/><ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="240"/><ColumnDefinition Width="320"/>
+                    <ColumnDefinition Width="90"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{x:Bind C0}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <Border Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Center" CornerRadius="{ThemeResource NG.Corner.Pill}" BorderThickness="1" Padding="11,4" Margin="0,0,8,0"
+                        Background="{x:Bind C1Bg}" BorderBrush="{x:Bind C1Bd}">
+                    <TextBlock Text="{x:Bind C1}" FontFamily="Consolas" FontSize="11" FontWeight="Bold" CharacterSpacing="60"
+                               Foreground="{x:Bind C1Fg}"/></Border>
+                <Border Grid.Column="2" HorizontalAlignment="Left" VerticalAlignment="Center" CornerRadius="{ThemeResource NG.Corner.Pill}" BorderThickness="1" Padding="11,4" Margin="0,0,8,0"
+                        Background="{x:Bind C2Bg}" BorderBrush="{x:Bind C2Bd}">
+                    <TextBlock Text="{x:Bind C2}" FontFamily="Consolas" FontSize="11" FontWeight="Bold" CharacterSpacing="60"
+                               Foreground="{x:Bind C2Fg}"/></Border>
+                <TextBlock Grid.Column="3" Text="{x:Bind C3}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="4" Text="{x:Bind C4}" TextTrimming="CharacterEllipsis"/>
+            </Grid>
+        </DataTemplate>
+        <!-- Per-app: Blocked count (col1) red when > 0 -->
+        <DataTemplate x:Key="TplPerApp" x:DataType="local:Row">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110"/><ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="240"/><ColumnDefinition Width="320"/>
+                    <ColumnDefinition Width="90"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{x:Bind C0}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="1" Text="{x:Bind C1}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" FontWeight="SemiBold"
+                           Foreground="{x:Bind C1BlockedFg}"/>
+                <TextBlock Grid.Column="2" Text="{x:Bind C2}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="3" Text="{x:Bind C3}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="4" Text="{x:Bind C4}" TextTrimming="CharacterEllipsis"/>
+            </Grid>
+        </DataTemplate>
+        <!-- Flows: anomaly (col3) amber when < 0, P(malicious) (col4) red when >= .5; both right-aligned -->
+        <DataTemplate x:Key="TplFlows" x:DataType="local:Row">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="110"/><ColumnDefinition Width="110"/>
+                    <ColumnDefinition Width="240"/><ColumnDefinition Width="320"/>
+                    <ColumnDefinition Width="90"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{x:Bind C0}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="1" Text="{x:Bind C1}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="2" Text="{x:Bind C2}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="3" Text="{x:Bind C3}" TextAlignment="Right" Margin="0,0,22,0"
+                           Foreground="{x:Bind C3AnomFg}"/>
+                <TextBlock Grid.Column="4" Text="{x:Bind C4}" TextAlignment="Right" Margin="0,0,4,0"
+                           Foreground="{x:Bind C4MalFg}"/>
+            </Grid>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <!-- Table: optional drill-down trust card + sticky sortable header + rows, in
+         one rounded card. Columns are fixed per view (SetView); tap a header to sort. -->
+    <Border x:Name="TableCard"
+            Background="{ThemeResource NG.Brush.BG.Surface}"
+            BorderBrush="{ThemeResource NG.Brush.Border.Subtle}"
+            BorderThickness="1" CornerRadius="12">
+        <Grid RowDefinitions="Auto,Auto,*">
+            <!-- Per-app drill-down trust panel: shown only in the app-detail view,
+                 filled via SetAppDetail. -->
+            <Border Grid.Row="0" x:Name="AppDetailCard" Visibility="Collapsed"
+                    Padding="20,14" BorderThickness="0,0,0,1"
+                    BorderBrush="{ThemeResource NG.Brush.Border.Subtle}">
+                <StackPanel Spacing="4">
+                    <TextBlock x:Name="AppDetailTotals" FontSize="13"
+                               Foreground="{ThemeResource NG.Brush.Text.Primary}"/>
+                    <TextBlock x:Name="AppDetailTrust" FontSize="12.5"
+                               Foreground="{ThemeResource NG.Brush.Text.Secondary}"/>
+                </StackPanel>
+            </Border>
+            <Grid Grid.Row="1" x:Name="HeaderRow" Height="46" Padding="20,0"
+                  BorderBrush="{ThemeResource NG.Brush.Border.Subtle}" BorderThickness="0,0,0,1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="HCol0" Width="140"/>
+                    <ColumnDefinition x:Name="HCol1" Width="130"/>
+                    <ColumnDefinition x:Name="HCol2" Width="*"/>
+                    <ColumnDefinition x:Name="HCol3" Width="200"/>
+                    <ColumnDefinition x:Name="HCol4" Width="84"/>
+                </Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="Transparent" Tag="0" Tapped="OnHeaderTap">
+                    <TextBlock x:Name="H0" VerticalAlignment="Center" Style="{StaticResource NG.Text.SectionHeader}"/></Border>
+                <Border Grid.Column="1" Background="Transparent" Tag="1" Tapped="OnHeaderTap">
+                    <TextBlock x:Name="H1" VerticalAlignment="Center" Style="{StaticResource NG.Text.SectionHeader}"/></Border>
+                <Border Grid.Column="2" Background="Transparent" Tag="2" Tapped="OnHeaderTap">
+                    <TextBlock x:Name="H2" VerticalAlignment="Center" Style="{StaticResource NG.Text.SectionHeader}"/></Border>
+                <Border Grid.Column="3" Background="Transparent" Tag="3" Tapped="OnHeaderTap">
+                    <TextBlock x:Name="H3" VerticalAlignment="Center" Style="{StaticResource NG.Text.SectionHeader}"/></Border>
+                <Border Grid.Column="4" Background="Transparent" Tag="4" Tapped="OnHeaderTap">
+                    <TextBlock x:Name="H4" VerticalAlignment="Center" Style="{StaticResource NG.Text.SectionHeader}"/></Border>
+            </Grid>
+            <ListView Grid.Row="2" x:Name="DataList" SelectionMode="Single" Padding="0"
+                      IsRightTapEnabled="True" RightTapped="OnRowRightTapped"
+                      IsDoubleTapEnabled="True" DoubleTapped="OnRowDoubleTapped"
+                      ContainerContentChanging="OnContainerChanging"
+                      ItemTemplate="{StaticResource TplGeneric}"
+                      Background="Transparent"
+                      ItemContainerTransitions="{x:Null}">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="Padding" Value="20,11"/>
+                        <Setter Property="MinHeight" Value="0"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    </Style>
+                </ListView.ItemContainerStyle>
+            </ListView>
+        </Grid>
+    </Border>
+</UserControl>

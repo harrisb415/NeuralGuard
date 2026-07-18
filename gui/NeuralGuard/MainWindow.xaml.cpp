@@ -17,6 +17,7 @@
 #include <microsoft.ui.xaml.window.h>   // IWindowNative -> HWND for the file dialogs
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -37,6 +38,67 @@ using namespace winrt::Microsoft::UI::Xaml::Media;
 
 namespace winrt::NeuralGuard::implementation
 {
+
+    MainWindow::MainWindow()
+    {
+        InitializeComponent();
+        Title(L"NeuralGuard");
+        SystemBackdrop(MicaBackdrop{});
+
+        // Integrated neon title bar: draw our own bar in the caption area and make
+        // its empty space draggable. Caption buttons blend with the dark surface.
+        ExtendsContentIntoTitleBar(true);
+        SetTitleBar(DragRegion());
+        // Caption colours are applied by ApplyCaptionColors (called from
+        // SyncThemeDependents) - they're an AppWindow API, not XAML resources,
+        // so they can't follow ThemeResource and must be re-set per theme.
+
+        // Window/taskbar icon: AppWindow doesn't inherit the exe's embedded .rc
+        // icon on its own, so point it at the loose copy deployed next to the
+        // exe (NeuralGuard.rc covers Explorer/shortcut icons; this covers the
+        // live window, taskbar, and Alt-Tab).
+        {
+            wchar_t exePath[MAX_PATH]{};
+            GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+            std::wstring dir(exePath);
+            size_t p = dir.find_last_of(L"\\/");
+            if (p != std::wstring::npos) dir = dir.substr(0, p);
+            AppWindow().SetIcon(dir + L"\\NeuralGuard.ico");
+        }
+
+        // Wire the data table's row actions back to us (it owns the list; the menus
+        // and DB writes stay here).
+        {
+            auto tbl = winrt::get_self<implementation::DataTable>(Tbl());
+            tbl->SetOnContext([this](NeuralGuard::Row row, FrameworkElement anchor, Point pos) {
+                ShowRowMenu(row, anchor, pos);
+            });
+            tbl->SetOnInvoke([this](NeuralGuard::Row row) { OnRowInvoked(row); });
+        }
+
+        // Apply the persisted theme before first paint. Defaults to dark - the
+        // designed look - so nothing changes for anyone who never touches the
+        // setting; App.xaml no longer forces Dark app-wide (see the note there).
+        ApplyTheme(MetaGet("theme", "dark"));
+
+        StartTray();
+
+        timer_ = DispatcherTimer{};
+        timer_.Interval(std::chrono::seconds(1));
+        timer_.Tick({ this, &MainWindow::OnTick });
+        timer_.Start();
+
+        toastTimer_ = DispatcherTimer{};
+        toastTimer_.Interval(std::chrono::seconds(6));
+        toastTimer_.Tick([this](IInspectable const&, IInspectable const&) {
+            toastTimer_.Stop();
+            Toast().IsOpen(false);
+        });
+
+        UpdateMode();
+        ShowView(L"live");
+        NavList().SelectedIndex(0);   // highlight Live in the sidebar
+    }
 
     // The dashboard always lives in a "dashboard\" subfolder of the install
     // root (ngd.exe, ngctl.exe, and ngpolicy.db live one level up - see
@@ -159,7 +221,6 @@ namespace winrt::NeuralGuard::implementation
     {
         curView_ = tag;
         viewReady_ = true;
-        liveItemsValid_ = false;   // force one full rebuild before Live's incremental diff resumes
         hstring title = L"Live";
         if (tag == L"rules") title = L"Rules";
         else if (tag == L"habits") title = L"Habits";
@@ -174,24 +235,22 @@ namespace winrt::NeuralGuard::implementation
         else if (tag == L"app-detail") title = detailApp_;   // the drilled-into app
         ViewTitle().Text(title);
 
-        // app-detail is a sub-view of Per-app: its back button + trust card show
-        // only here; every other view collapses them.
+        // app-detail is a sub-view of Per-app: its back button shows only here (the
+        // trust card lives in the DataTable control, set by RefreshCurrent).
         bool appDetail = (tag == L"app-detail");
         AppDetailBack().Visibility(appDetail ? Visibility::Visible : Visibility::Collapsed);
-        AppDetailCard().Visibility(appDetail ? Visibility::Visible : Visibility::Collapsed);
 
         bool settings = (tag == L"settings");
         bool insights = (tag == L"insights");
         bool table = !settings && !insights;   // the shared sortable data table
-        TableCard().Visibility(table ? Visibility::Visible : Visibility::Collapsed);
+        Tbl().Visibility(table ? Visibility::Visible : Visibility::Collapsed);
         SettingsPanel().Visibility(settings ? Visibility::Visible : Visibility::Collapsed);
         InsightsPanel().Visibility(insights ? Visibility::Visible : Visibility::Collapsed);
         SearchBox().Visibility(table ? Visibility::Visible : Visibility::Collapsed);
         RulesTools().Visibility((tag == L"rules") ? Visibility::Visible : Visibility::Collapsed);
         FlagsTools().Visibility((tag == L"flags") ? Visibility::Visible : Visibility::Collapsed);
         FeedbackTools().Visibility((tag == L"feedback") ? Visibility::Visible : Visibility::Collapsed);
-        filter_ = L"";
-        SearchBox().Text(L"");   // reset the filter when switching views
+        SearchBox().Text(L"");   // reset the filter when switching views (fires OnSearchChanged)
         if (settings) LoadSettings();
         else if (insights)
         {
@@ -212,32 +271,24 @@ namespace winrt::NeuralGuard::implementation
             else if (tag == L"apps") tpl = L"TplPerApp";
             else if (tag == L"flows") tpl = L"TplFlows";
             // app-detail uses the plain generic template (destination breakdown).
-            auto res = ContentRoot().Resources();
-            if (res.HasKey(box_value(tpl)))
-                DataList().ItemTemplate(res.Lookup(box_value(tpl)).as<winrt::Microsoft::UI::Xaml::DataTemplate>());
 
             // Per-view column widths (the * column fills; 0 = unused 5th column).
-            // Widths mirror the prototype grid-template-columns exactly.
-            if (tag == L"live") SetCols(130, 128, -1, 210, 84);
-            else if (tag == L"flags")                SetCols(120, 120, 90, -1, 240);
-            else if (tag == L"baseline")             SetCols(80, 90, 130, -1, 80);
-            else if (tag == L"feedback")             SetCols(120, 120, 120, -1, 220);
-            else if (tag == L"apps")                 SetCols(120, 110, 100, -1, 0);
-            else if (tag == L"flows")                SetCols(120, -1, 230, 110, 110);
-            else if (tag == L"rules")                SetCols(120, 90, 120, -1, 0);
-            else if (tag == L"inbound")              SetCols(110, 80, 90, -1, 150);
-            else if (tag == L"habits")               SetCols(110, 90, -1, 260, 0);
-            else if (tag == L"app-detail")           SetCols(-1, 80, 130, 110, 90);
-            else                                     SetCols(130, 128, -1, 210, 84);
+            std::array<double, 5> w{ 130, 128, -1, 210, 84 };
+            if (tag == L"flags")           w = { 120, 120, 90, -1, 240 };
+            else if (tag == L"baseline")   w = { 80, 90, 130, -1, 80 };
+            else if (tag == L"feedback")   w = { 120, 120, 120, -1, 220 };
+            else if (tag == L"apps")       w = { 120, 110, 100, -1, 0 };
+            else if (tag == L"flows")      w = { 120, -1, 230, 110, 110 };
+            else if (tag == L"rules")      w = { 120, 90, 120, -1, 0 };
+            else if (tag == L"inbound")    w = { 110, 80, 90, -1, 150 };
+            else if (tag == L"habits")     w = { 110, 90, -1, 260, 0 };
+            else if (tag == L"app-detail") w = { -1, 80, 130, 110, 90 };
 
-            // Flows right-aligns its two numeric headers (Anomaly, P(malicious)) to
-            // sit above the right-aligned score cells; every other view is left-aligned.
-            using winrt::Microsoft::UI::Xaml::TextAlignment;
-            bool rightNums = (tag == L"flows");
-            H3().TextAlignment(rightNums ? TextAlignment::Right : TextAlignment::Left);
-            H4().TextAlignment(rightNums ? TextAlignment::Right : TextAlignment::Left);
-            H3().Margin(rightNums ? Thickness{ 0, 0, 22, 0 } : Thickness{ 0, 0, 0, 0 });
-            H4().Margin(rightNums ? Thickness{ 0, 0, 4, 0 } : Thickness{ 0, 0, 0, 0 });
+            auto tbl = winrt::get_self<implementation::DataTable>(Tbl());
+            tbl->SetView(tpl, w);
+            // Flows right-aligns its two numeric headers over the right-aligned score cells.
+            tbl->SetHeaderRightAlign(tag == L"flows", tag == L"flows");
+            if (!appDetail) tbl->SetAppDetail(false, L"", L"");   // clear trust card unless drilling in
             RefreshCurrent();
         }
     }
@@ -245,8 +296,8 @@ namespace winrt::NeuralGuard::implementation
     void MainWindow::OnSearchChanged(Controls::AutoSuggestBox const& box,
                                      Controls::AutoSuggestBoxTextChangedEventArgs const&)
     {
-        filter_ = box.Text();
-        if (curView_ != L"settings") RefreshCurrent();
+        if (curView_ == L"settings" || curView_ == L"insights") return;
+        winrt::get_self<implementation::DataTable>(Tbl())->SetFilter(box.Text());
     }
 
     HWND MainWindow::WindowHandle()
@@ -296,7 +347,7 @@ namespace winrt::NeuralGuard::implementation
 
     void MainWindow::OnTick(IInspectable const&, IInspectable const&)
     {
-        if (resizeCol_ >= 0 || menuOpen_) return;   // don't rebuild mid-drag or while a menu is open
+        if (menuOpen_) return;   // don't rebuild while a row context menu is open
         UpdateMode();
         if (curView_ == L"live") RefreshCurrent();
         else if (curView_ == L"settings") RefreshServiceStatus();   // reflect install/remove

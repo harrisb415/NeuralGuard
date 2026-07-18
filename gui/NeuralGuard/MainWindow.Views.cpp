@@ -34,9 +34,15 @@ using namespace winrt::Microsoft::UI::Xaml::Media;
 namespace winrt::NeuralGuard::implementation
 {
 
+    // The view branches call this per refresh; forward to the table control.
+    void MainWindow::SetHeaders(hstring const& h0, hstring const& h1, hstring const& h2,
+                                hstring const& h3, hstring const& h4)
+    {
+        winrt::get_self<implementation::DataTable>(Tbl())->SetHeaders({ h0, h1, h2, h3, h4 });
+    }
+
     void MainWindow::RefreshCurrent()
     {
-        struct RowData { int64_t id; hstring c[5]; };
         std::vector<RowData> rows;
         ng::Db d;
         bool ok = d.open(DbPathU8().c_str());
@@ -256,176 +262,17 @@ namespace winrt::NeuralGuard::implementation
                 "  WHERE COALESCE(signer, image_path, '(unknown)') = ?);", label,
                 [&](sqlite3_stmt* s) { mlflags = sqlite3_column_int(s, 0); });
 
-            AppDetailTotals().Text(U8(to_string(detailEvents_) + " events · " + to_string(detailBlocked_) +
-                                      " blocked · " + to_string(detailDests_) + " destinations" +
-                                      (lastSeen.empty() ? "" : "  ·  last seen " + lastSeen) +
-                                      "   (last 14 days)"));
-            AppDetailTrust().Text(U8("Learned habits: " + std::to_string(habits) +
-                                     "    ML flags: " + (mlflags ? std::to_string(mlflags) : std::string("none"))));
+            hstring totals = U8(to_string(detailEvents_) + " events · " + to_string(detailBlocked_) +
+                                " blocked · " + to_string(detailDests_) + " destinations" +
+                                (lastSeen.empty() ? "" : "  ·  last seen " + lastSeen) +
+                                "   (last 14 days)");
+            hstring trust = U8("Learned habits: " + std::to_string(habits) +
+                               "    ML flags: " + (mlflags ? std::to_string(mlflags) : std::string("none")));
+            winrt::get_self<implementation::DataTable>(Tbl())->SetAppDetail(true, totals, trust);
         }
-        // (the Settings and Digest views use their own panels, not the data table)
+        // (Settings/Insights use their own panels, not this table.)
 
-        if (!filter_.empty())
-        {
-            std::string f = to_string(filter_);
-            for (auto& ch : f) ch = (char)tolower((unsigned char)ch);
-            rows.erase(std::remove_if(rows.begin(), rows.end(), [&](RowData const& r) {
-                for (int i = 0; i < 5; ++i)
-                {
-                    std::string c = to_string(r.c[i]);
-                    for (auto& ch : c) ch = (char)tolower((unsigned char)ch);
-                    if (c.find(f) != std::string::npos) return false;   // a column matches - keep
-                }
-                return true;   // nothing matched - drop
-            }), rows.end());
-        }
-
-        if (rows.empty())
-            rows.push_back({ 0, { L"", L"", !filter_.empty() ? hstring(L"(no matches)")
-                                          : ok ? hstring(L"(no rows yet)")
-                                               : U8("(DB not found at " + DbPathU8() + ")"), L"", L"" } });
-
-        if (sortCol_ >= 0 && sortCol_ < 5)
-        {
-            int col = sortCol_; bool asc = sortAsc_;
-            std::stable_sort(rows.begin(), rows.end(), [col, asc](RowData const& a, RowData const& b) {
-                std::string sa = to_string(a.c[col]), sb = to_string(b.c[col]);
-                char* ea = nullptr; char* eb = nullptr;
-                double da = std::strtod(sa.c_str(), &ea), db = std::strtod(sb.c_str(), &eb);
-                bool na = !sa.empty() && ea && *ea == 0, nb = !sb.empty() && eb && *eb == 0;
-                int cmp;
-                if (na && nb) cmp = da < db ? -1 : da > db ? 1 : 0;
-                else {
-                    for (auto& ch : sa) ch = (char)tolower((unsigned char)ch);
-                    for (auto& ch : sb) ch = (char)tolower((unsigned char)ch);
-                    int c = sa.compare(sb); cmp = c < 0 ? -1 : c > 0 ? 1 : 0;
-                }
-                return asc ? cmp < 0 : cmp > 0;
-            });
-        }
-
-        // Remember the selected row (by id) and the scroll position, so both
-        // survive the wholesale rebuild below - a live-updating list (Live
-        // refreshes every second) is otherwise unscrollable, since replacing
-        // ItemsSource resets a ListView's ScrollViewer to the top on every tick.
-        int64_t selId = 0;
-        if (auto sel = DataList().SelectedItem().try_as<NeuralGuard::Row>()) selId = sel.Id();
-        auto scroller = FindScrollViewer(DataList());
-        double vOffset = scroller ? scroller.VerticalOffset() : 0;
-
-        // Live refreshes once a second; a wholesale ItemsSource replacement (every
-        // other view's approach, still used below) flickers every tick, since a
-        // new ItemsSource is entirely new content to WinUI even when only a
-        // couple of rows actually changed. While Live's already-realized
-        // collection is valid (liveItemsValid_ - cleared on every tab switch by
-        // ShowView), mutate it in place instead.
-        //
-        // A naive index-aligned prefix/suffix diff does NOT work here: the query
-        // is capped at LIMIT 300, so once the feed is full, every new row at the
-        // front pushes one off the back - which shifts every surviving row's
-        // INDEX by however many new ones arrived. Comparing old[i] to new[i]
-        // then finds nothing matching anywhere, degenerating to "remove all,
-        // insert all" - worse than the ItemsSource swap it was meant to replace.
-        //
-        // The right model exploits what this feed actually is: zero or more
-        // brand-new rows prepended at the front, then the SAME old rows in the
-        // same relative order, with some possibly trimmed off the tail by the
-        // LIMIT. So: find where the old list's first row reappears in the new
-        // list (that position is how many rows are genuinely new), then verify
-        // the rest really does line up before trusting it - if a filter or sort
-        // is active this won't hold, and falling through to a full rebuild is
-        // correct instead of applying a wrong patch.
-        if (curView_ == L"live" && liveItemsValid_ && !liveIds_.empty())
-        {
-            std::vector<int64_t> newIds;
-            newIds.reserve(rows.size());
-            for (auto const& r : rows) newIds.push_back(r.id);
-
-            size_t oldN = liveIds_.size(), newN = newIds.size();
-            size_t k = 0;
-            while (k < newN && newIds[k] != liveIds_[0]) ++k;
-
-            bool aligned = k < newN;
-            size_t overlap = 0;
-            if (aligned)
-            {
-                overlap = (oldN < newN - k) ? oldN : (newN - k);
-                for (size_t i = 0; i < overlap; ++i)
-                    if (newIds[k + i] != liveIds_[i]) { aligned = false; break; }
-            }
-
-            if (aligned)
-            {
-                for (size_t i = 0; i < k; ++i)
-                {
-                    auto const& r = rows[i];
-                    liveItems_.InsertAt((uint32_t)i, MakeRow(r.id, r.c[0], r.c[1], r.c[2], r.c[3], r.c[4]));
-                }
-                while (liveItems_.Size() > (uint32_t)newN) liveItems_.RemoveAt(liveItems_.Size() - 1);
-                liveIds_ = std::move(newIds);
-
-                if (selId != 0)
-                {
-                    uint32_t idx = 0;
-                    for (auto const& it : liveItems_)
-                    {
-                        if (auto r = it.try_as<NeuralGuard::Row>(); r && r.Id() == selId)
-                        {
-                            DataList().SelectedIndex((int32_t)idx);
-                            break;
-                        }
-                        ++idx;
-                    }
-                }
-                // No scroll-offset restore needed here: inserting/removing
-                // individual items doesn't reset the ScrollViewer the way a full
-                // ItemsSource replacement does.
-                return;
-            }
-            // Not aligned (filter/sort active, or a burst bigger than the page) -
-            // fall through to the full rebuild below.
-        }
-
-        auto items = single_threaded_observable_vector<IInspectable>();
-        for (auto const& r : rows)
-            items.Append(MakeRow(r.id, r.c[0], r.c[1], r.c[2], r.c[3], r.c[4]));
-        DataList().ItemsSource(items);
-
-        if (curView_ == L"live")
-        {
-            // First landing on Live (or the tick right after a tab switch): seed
-            // the persisted collection so subsequent ticks can diff against it.
-            liveItems_ = items;
-            liveIds_.clear();
-            liveIds_.reserve(rows.size());
-            for (auto const& r : rows) liveIds_.push_back(r.id);
-            liveItemsValid_ = true;
-        }
-
-        if (selId != 0)
-        {
-            uint32_t idx = 0;
-            for (auto const& it : items)
-            {
-                if (auto r = it.try_as<NeuralGuard::Row>(); r && r.Id() == selId)
-                {
-                    DataList().SelectedIndex((int32_t)idx);
-                    break;
-                }
-                ++idx;
-            }
-        }
-
-        // Restoring immediately would race the layout pass that the new
-        // ItemsSource still needs to run (the ScrollViewer's scrollable extent
-        // isn't updated yet) - defer to the next UI-thread tick, by which point
-        // WinUI has measured/arranged the new items.
-        if (vOffset > 0)
-        {
-            DispatcherQueue().TryEnqueue([this, vOffset] {
-                if (auto sv = FindScrollViewer(DataList()))
-                    sv.ChangeView(nullptr, box_value(vOffset).as<IReference<double>>(), nullptr, true);
-            });
-        }
+        hstring emptyText = ok ? hstring(L"(no rows yet)") : U8("(DB not found at " + DbPathU8() + ")");
+        winrt::get_self<implementation::DataTable>(Tbl())->SetRows(rows, curView_ == L"live", emptyText);
     }
 }

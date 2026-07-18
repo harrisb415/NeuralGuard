@@ -1,0 +1,13 @@
+namespace NeuralGuard
+{
+    // The shared sortable/filterable 5-column data table, extracted from
+    // MainWindow. Every list view (Live, Rules, Habits, Per-app, Flows, Flags,
+    // Baseline, Inbound, Feedback, app-detail) is this control fed different rows.
+    // Projected surface is just the ctor; MainWindow drives it (SetView/SetRows/
+    // SetFilter, action callbacks) via winrt::get_self, same as InsightsView.
+    [default_interface]
+    runtimeclass DataTable : Microsoft.UI.Xaml.Controls.UserControl
+    {
+        DataTable();
+    }
+}

@@ -268,7 +268,7 @@ namespace winrt::NeuralGuard::implementation
         // established a view - refreshing then would query for a view that isn't
         // set up yet. The initial ShowView paints with the right theme anyway,
         // since SetLightTheme has already landed by that point.
-        liveItemsValid_ = false;
+        winrt::get_self<implementation::DataTable>(Tbl())->InvalidateRows();
         if (!curView_.empty() && viewReady_) RefreshCurrent();
     }
 
