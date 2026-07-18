@@ -5,6 +5,33 @@ All notable changes to NeuralGuard are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.9] - 2026-07-18
+
+### Added
+
+- **Insights tab**, replacing the old plain-text Digest. A card-grid summary of
+  what the habit engine and ML tier have learned: current mode + active
+  thresholds, habit/app/destination counts, a scored-vs-unscored ring, active
+  demotions and review flags, the most recently flagged flows, and the
+  benign/malicious feedback split - each with a jump-link to the tab that holds
+  the full detail (Settings, Flags, Flows). Everything advisory, nothing
+  enforced from this view.
+
+### Changed
+
+- The Active-mode note in Settings (Machine Learning) is now a proper amber
+  warning callout instead of small italic caption text that was hard to read
+  in both themes.
+
+### Internal
+
+- Reorganized the dashboard's source for maintainability - no user-visible
+  behavior change. `MainWindow.xaml.cpp` had grown to ~1,950 lines covering
+  every concern; its implementation is now split by concern across several
+  files, and the Insights tab plus the shared sortable table (reused by every
+  list view) are now self-contained UserControls rather than markup and code
+  living inline in the main window.
+
 ## [1.5.8] - 2026-07-17
 
 ### Added
