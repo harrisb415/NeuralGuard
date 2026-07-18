@@ -162,6 +162,13 @@
     <ClCompile Include="MainWindow.xaml.cpp">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </ClCompile>
+    <!-- MainWindow's implementation is split by concern across these files; only
+         MainWindow.xaml.cpp pulls in the generated MainWindow.g.cpp glue. -->
+    <ClCompile Include="MainWindow.Table.cpp" />
+    <ClCompile Include="MainWindow.Views.cpp" />
+    <ClCompile Include="MainWindow.RowActions.cpp" />
+    <ClCompile Include="MainWindow.Settings.cpp" />
+    <ClCompile Include="MainWindow.Insights.cpp" />
     <ClCompile Include="$(GeneratedFilesDir)module.g.cpp" />
     <ClCompile Include="deps\sqlite3.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
@@ -192,6 +199,7 @@
     <ClInclude Include="ColWidths.h" />
     <ClInclude Include="ColumnGrip.h" />
     <ClInclude Include="SemBrush.h" />
+    <ClInclude Include="MainWindow.Shared.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Row.cpp">
