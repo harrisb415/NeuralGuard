@@ -35,6 +35,7 @@ add_library(ngcore STATIC
   src/core/habit.cpp
   src/core/enforcer.cpp
   src/core/flowstats.cpp
+  src/core/iforest.cpp
   src/core/scorer.cpp
   src/core/prompt.cpp
   src/core/updater.cpp)

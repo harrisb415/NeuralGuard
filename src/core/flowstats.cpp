@@ -182,12 +182,15 @@ bool FlowCollector::run(int seconds) {
                 f.remotePort == 443 ? 1.0f : 0.0f,
                 f.remotePort == 80 ? 1.0f : 0.0f,
             };
-            std::vector<float> anom = sup;
-            anom.push_back(f.procKey.rfind("sig:", 0) == 0 ? 1.0f : 0.0f);
-            anom.push_back((float)st.wHour);
+            // Anomaly vector via the shared builder (same one the trainer uses, so
+            // the 8-feature contract can't drift). It's the 6 network features plus
+            // is_signed + UTC hour.
+            std::vector<float> anom = anomalyFeatures(durMs, (long long)f.bytesIn, (long long)f.bytesOut,
+                                                      (int)f.remotePort,
+                                                      f.procKey.rfind("sig:", 0) == 0, (int)st.wHour);
             if (anomaly_.loaded()) {
-                auto o = anomaly_.run(anom);
-                if (!o.empty()) { anomScore = o[0]; haveAnom = true; }
+                anomScore = anomaly_.score(anom);   // native Isolation Forest, decision_function scale
+                haveAnom = true;
             }
             if (supervised_.loaded()) {
                 auto o = supervised_.run(sup);            // [P(benign), P(malicious)]

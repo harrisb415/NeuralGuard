@@ -10,6 +10,7 @@
 // anything. Needs Administrator - enabling ESTATS collection is privileged.
 #pragma once
 
+#include "core/iforest.h"
 #include "core/scorer.h"
 
 #include <atomic>
@@ -55,7 +56,8 @@ private:
     DnsWatcher* dns_ = nullptr;
     std::string anomalyPath_, supervisedPath_;
     bool active_ = false;
-    OnnxModel anomaly_, supervised_;
+    IsolationForest anomaly_;   // native, trained on-device (anomaly.model)
+    OnnxModel supervised_;      // still ONNX (the optional public-dataset classifier)
     void* stopEvent_ = nullptr;
     std::atomic<unsigned long long> written_{ 0 };
 };

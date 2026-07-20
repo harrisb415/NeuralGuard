@@ -93,7 +93,7 @@ std::string ModelPathFor(const char* dbPath, const char* name) {
 void MaybeEnableScoring(ng::FlowCollector& collector, ng::Db& db, const char* dbPath) {
     std::string mode = MetaGet(db, "ml_mode", "shadow");
     if (mode != "off")
-        collector.enableScoring(ModelPathFor(dbPath, "anomaly.onnx"),
+        collector.enableScoring(ModelPathFor(dbPath, "anomaly.model"),
                                 ModelPathFor(dbPath, "supervised.onnx"),
                                 mode == "active");
 }
@@ -988,6 +988,77 @@ int main(int argc, char** argv) {
     // `features` has sub-subcommands (dump/purge), so handle it before the flat
     // mode parser below treats argv[2] as a db path.
     if (argc >= 2 && strcmp(argv[1], "features") == 0) return RunFeatures(argc, argv);
+
+    // `train-anomaly [db] [days]` - train the native on-device anomaly model
+    // (Isolation Forest) from flow_features and write anomaly.model next to the DB.
+    // days=0/omitted = all history; otherwise the rolling last N days (the
+    // "adaptation window"). DB-only, no admin. This is the manual trigger; the
+    // service will call the same path on a schedule once the lifecycle lands.
+    if (argc >= 2 && strcmp(argv[1], "train-anomaly") == 0) {
+        const char* dbPath = argc >= 3 ? argv[2] : "ngpolicy.db";
+        int days = argc >= 4 ? atoi(argv[3]) : 0;
+        ng::Db db;
+        if (!db.open(dbPath)) { fprintf(stderr, "cannot open %s\n", dbPath); return 1; }
+        std::string sql =
+            "SELECT ts_utc, process_key, remote_port, duration_ms, bytes_in, bytes_out FROM flow_features";
+        if (days > 0)
+            sql += " WHERE ts_utc >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-" + std::to_string(days) + " days')";
+        std::vector<float> rows; size_t n = 0;
+        sqlite3_stmt* s = nullptr;
+        if (sqlite3_prepare_v2(db.handle(), sql.c_str(), -1, &s, nullptr) != SQLITE_OK) {
+            fprintf(stderr, "query failed: %s\n", sqlite3_errmsg(db.handle())); return 1;
+        }
+        while (sqlite3_step(s) == SQLITE_ROW) {
+            auto txt = [&](int i) { const char* t = (const char*)sqlite3_column_text(s, i); return std::string(t ? t : ""); };
+            std::string ts = txt(0), pkey = txt(1);
+            int port = sqlite3_column_int(s, 2);
+            long long dur = sqlite3_column_int64(s, 3), bin = sqlite3_column_int64(s, 4), bout = sqlite3_column_int64(s, 5);
+            int hour = ts.size() >= 13 ? atoi(ts.substr(11, 2).c_str()) : 0;
+            std::vector<float> v = ng::anomalyFeatures(dur, bin, bout, port, pkey.rfind("sig:", 0) == 0, hour);
+            rows.insert(rows.end(), v.begin(), v.end());
+            ++n;
+        }
+        sqlite3_finalize(s);
+        if (n == 0) {
+            fprintf(stderr, "no flow_features rows%s - collect first (ngd features on).\n", days > 0 ? " in window" : "");
+            return 1;
+        }
+        ng::IsolationForest forest;
+        forest.train(rows, n);
+        std::string out = ModelPathFor(dbPath, "anomaly.model");
+        if (!forest.save(out)) { fprintf(stderr, "save failed: %s\n", out.c_str()); return 1; }
+        printf("trained anomaly model on %zu flow(s), %zu trees -> %s\n", n, forest.treeCount(), out.c_str());
+        if (n < 200) fprintf(stderr, "note: only %zu rows; small/placeholder model - let more accumulate.\n", n);
+        return 0;
+    }
+
+    // `score-dump [db]` - load anomaly.model and print id,score (native decision
+    // value; lower = more anomalous) for every flow_features row. For validation
+    // and "why was this flagged" inspection.
+    if (argc >= 2 && strcmp(argv[1], "score-dump") == 0) {
+        const char* dbPath = argc >= 3 ? argv[2] : "ngpolicy.db";
+        ng::Db db;
+        if (!db.open(dbPath)) { fprintf(stderr, "cannot open %s\n", dbPath); return 1; }
+        ng::IsolationForest forest;
+        std::string mp = ModelPathFor(dbPath, "anomaly.model");
+        if (!forest.load(mp)) { fprintf(stderr, "no model at %s (train-anomaly first)\n", mp.c_str()); return 1; }
+        sqlite3_stmt* s = nullptr;
+        sqlite3_prepare_v2(db.handle(),
+            "SELECT id, ts_utc, process_key, remote_port, duration_ms, bytes_in, bytes_out FROM flow_features;",
+            -1, &s, nullptr);
+        printf("id,score\n");
+        while (sqlite3_step(s) == SQLITE_ROW) {
+            auto txt = [&](int i) { const char* t = (const char*)sqlite3_column_text(s, i); return std::string(t ? t : ""); };
+            std::string ts = txt(1), pkey = txt(2);
+            int port = sqlite3_column_int(s, 3);
+            long long dur = sqlite3_column_int64(s, 4), bin = sqlite3_column_int64(s, 5), bout = sqlite3_column_int64(s, 6);
+            int hour = ts.size() >= 13 ? atoi(ts.substr(11, 2).c_str()) : 0;
+            std::vector<float> v = ng::anomalyFeatures(dur, bin, bout, port, pkey.rfind("sig:", 0) == 0, hour);
+            printf("%lld,%.6f\n", (long long)sqlite3_column_int64(s, 0), forest.score(v));
+        }
+        sqlite3_finalize(s);
+        return 0;
+    }
 
     // `events purge [db] [days]` - manually trim the raw flow_events log. The
     // record/enforce daemons purge on startup automatically; this is for on-demand

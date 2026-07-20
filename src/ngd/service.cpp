@@ -45,7 +45,7 @@ std::string ModelPathFor(const char* name) {
 void MaybeEnableScoring(FlowCollector& collector, Db& db) {
     std::string mode = db.meta("ml_mode", "shadow");
     if (mode != "off")
-        collector.enableScoring(ModelPathFor("anomaly.onnx"), ModelPathFor("supervised.onnx"),
+        collector.enableScoring(ModelPathFor("anomaly.model"), ModelPathFor("supervised.onnx"),
                                 mode == "active");
 }
 
