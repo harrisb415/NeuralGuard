@@ -318,15 +318,16 @@
                                 <TextBlock x:Name="WindowGuidance" Style="{StaticResource NG.Text.Muted}" FontSize="12"
                                            TextWrapping="Wrap" Margin="0,4,0,18" MaxWidth="620"/>
 
-                                <!-- Auto-train toggle -->
-                                <Grid Margin="0,0,0,16" MaxWidth="620" HorizontalAlignment="Left">
-                                    <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                                <!-- Auto-train toggle. Two explicit columns so the switch can't overlap
+                                     the description (a single-cell Grid collapses to content width). -->
+                                <Grid Margin="0,0,0,16" ColumnDefinitions="*,Auto">
+                                    <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
                                         <TextBlock Text="Train automatically" Foreground="{ThemeResource NG.Brush.Text.Primary}"/>
                                         <TextBlock Text="Activate once the first window is ready, then refresh nightly"
-                                                   Style="{StaticResource NG.Text.Secondary}" FontSize="12"/>
+                                                   Style="{StaticResource NG.Text.Secondary}" FontSize="12" TextWrapping="Wrap"/>
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="AutoTrainToggle" OnContent="On" OffContent="Off"
-                                                  Toggled="OnAutoTrainToggle" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    <ToggleSwitch Grid.Column="1" x:Name="AutoTrainToggle" OnContent="On" OffContent="Off"
+                                                  Toggled="OnAutoTrainToggle" VerticalAlignment="Center"/>
                                 </Grid>
 
                                 <Button x:Name="RetrainBtn" Content="Retrain now" Click="OnRetrainNow"
