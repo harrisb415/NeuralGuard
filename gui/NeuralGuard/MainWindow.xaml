@@ -267,7 +267,7 @@
                                                   Width="15" Height="15" VerticalAlignment="Top" Margin="0,2,10,0"
                                                   Foreground="{ThemeResource NG.Brush.Verdict.Monitor}"/>
                                         <TextBlock Grid.Column="1"
-                                                   Text="Active never auto-blocks: a demoted app simply loses its automatic pass and asks you the next time it connects, exactly like a brand-new app. Only enable this once the models are trained on your own traffic - the shipped models are placeholders. Demotions show under the Flags view."
+                                                   Text="Active never auto-blocks: a demoted app simply loses its automatic pass and asks you the next time it connects, exactly like a brand-new app. Best switched on after your anomaly model has trained on your own traffic (see Anomaly model below). Demotions show under the Flags view."
                                                    Foreground="{ThemeResource NG.Brush.Text.Primary}" TextWrapping="Wrap" FontSize="13"/>
                                     </Grid>
                                 </Border>
@@ -287,6 +287,50 @@
                                                         SpinButtonPlacementMode="Compact" ValueChanged="OnMlThresholdChanged"/>
                                     </StackPanel>
                                 </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="ANOMALY MODEL" Style="{StaticResource NG.Text.SectionHeader}" Margin="0,26,0,10"/>
+                        <Border Style="{StaticResource NG.Card}">
+                            <StackPanel>
+                                <TextBlock Text="The anomaly detector trains itself on your own traffic - no external tools, nothing to download. It spends an initial learning window building your baseline, then activates and keeps adapting as your habits change."
+                                           Style="{StaticResource NG.Text.Secondary}" TextWrapping="Wrap" Margin="0,0,0,14"/>
+
+                                <!-- Model status (learning progress / active), filled by LoadSettings -->
+                                <Border Background="{ThemeResource NG.Brush.Verdict.CapAllow.BG}" CornerRadius="8" Padding="14,12" Margin="0,0,0,18">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock x:Name="ModelStatus" Text="" Foreground="{ThemeResource NG.Brush.Text.Primary}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                        <TextBlock x:Name="ModelStatusSub" Text="" Style="{StaticResource NG.Text.Secondary}" FontSize="12.5" TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Adaptation window slider + guidance -->
+                                <TextBlock Text="Adaptation window" FontWeight="SemiBold"/>
+                                <TextBlock Text="How many days of your recent traffic the model reflects - both the initial learning period and the window it re-trains on each night."
+                                           Style="{StaticResource NG.Text.Secondary}" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center" MaxWidth="620" HorizontalAlignment="Left">
+                                    <Slider x:Name="WindowSlider" Grid.Column="0" Minimum="7" Maximum="30" Value="14"
+                                            StepFrequency="1" TickFrequency="1" ValueChanged="OnWindowChanged"
+                                            Margin="0,0,16,0" MinWidth="360"/>
+                                    <TextBlock x:Name="WindowValue" Grid.Column="1" Text="14 days" FontWeight="SemiBold"
+                                               VerticalAlignment="Center" MinWidth="64"/>
+                                </Grid>
+                                <TextBlock x:Name="WindowGuidance" Style="{StaticResource NG.Text.Muted}" FontSize="12"
+                                           TextWrapping="Wrap" Margin="0,4,0,18" MaxWidth="620"/>
+
+                                <!-- Auto-train toggle -->
+                                <Grid Margin="0,0,0,16" MaxWidth="620" HorizontalAlignment="Left">
+                                    <StackPanel HorizontalAlignment="Left" VerticalAlignment="Center">
+                                        <TextBlock Text="Train automatically" Foreground="{ThemeResource NG.Brush.Text.Primary}"/>
+                                        <TextBlock Text="Activate once the first window is ready, then refresh nightly"
+                                                   Style="{StaticResource NG.Text.Secondary}" FontSize="12"/>
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="AutoTrainToggle" OnContent="On" OffContent="Off"
+                                                  Toggled="OnAutoTrainToggle" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                </Grid>
+
+                                <Button x:Name="RetrainBtn" Content="Retrain now" Click="OnRetrainNow"
+                                        Style="{StaticResource NG.Button.Ghost}" HorizontalAlignment="Left"/>
                             </StackPanel>
                         </Border>
 

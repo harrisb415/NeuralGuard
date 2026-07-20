@@ -127,6 +127,51 @@ namespace winrt::NeuralGuard::implementation
         if (curView_ == L"rules") RefreshCurrent();
     }
 
+    // The tradeoff text under the adaptation-window slider - the on-screen guidance
+    // for choosing the days, updated live as the slider moves. (Named ...Text so it
+    // doesn't collide with the WindowGuidance XAML element accessor.)
+    static winrt::hstring WindowGuidanceText(int days)
+    {
+        if (days <= 10)
+            return L"Fast to adapt and quick to activate - but may miss weekly patterns (weekends look different from weekdays).";
+        if (days <= 20)
+            return L"Recommended. Covers a full week or more of your rhythm; adapts to new habits within a day or two.";
+        return L"Most stable and representative, and hardest for a threat to drift into \"normal\" - but slower to reflect genuinely new habits.";
+    }
+
+    void MainWindow::OnWindowChanged(IInspectable const&, Controls::Primitives::RangeBaseValueChangedEventArgs const& e)
+    {
+        if (loadingSettings_) return;
+        // A Slider coerces its value while XAML is still parsing (0 -> Minimum),
+        // which fires this before WindowValue/WindowGuidance exist - guard against
+        // that so the load doesn't crash.
+        auto val = WindowValue();
+        auto guide = WindowGuidance();
+        if (!val || !guide) return;
+        int days = (int)std::lround(e.NewValue());
+        val.Text(U8(std::to_string(days) + (days == 1 ? " day" : " days")));
+        guide.Text(WindowGuidanceText(days));
+        MetaSet("ml_window_days", std::to_string(days).c_str());
+    }
+
+    void MainWindow::OnAutoTrainToggle(IInspectable const& sender, RoutedEventArgs const&)
+    {
+        if (loadingSettings_) return;
+        MetaSet("ml_auto_train", sender.as<ToggleSwitch>().IsOn() ? "1" : "0");
+    }
+
+    void MainWindow::OnRetrainNow(IInspectable const&, RoutedEventArgs const&)
+    {
+        bool ok = false;
+        std::string reply = ng::CmdSend("RETRAIN", &ok);
+        if (ok && reply.rfind("OK", 0) == 0)
+            Notify(L"Retraining the anomaly model now - it refreshes in the background.", InfoBarSeverity::Success);
+        else if (ok)
+            Notify(U8(reply), InfoBarSeverity::Warning);   // e.g. not currently collecting
+        else
+            Notify(L"Couldn't reach the service - is it running and collecting?", InfoBarSeverity::Error);
+    }
+
     void MainWindow::LoadSettings()
     {
         loadingSettings_ = true;   // syncing the controls must not write back / toast
@@ -146,6 +191,52 @@ namespace winrt::NeuralGuard::implementation
         MalThresh().Value(std::strtod(MetaGet("ml_malicious_threshold", "0.9").c_str(), nullptr));
         AnomThresh().Value(std::strtod(MetaGet("ml_anomaly_threshold", "-0.15").c_str(), nullptr));
         GatesPanel().Visibility(mode == "active" ? Visibility::Visible : Visibility::Collapsed);
+
+        // --- Anomaly model lifecycle (Phase C) ---
+        int windowDays = atoi(MetaGet("ml_window_days", "14").c_str());
+        windowDays = windowDays < 7 ? 7 : windowDays > 30 ? 30 : windowDays;
+        WindowSlider().Value(windowDays);
+        WindowValue().Text(U8(std::to_string(windowDays) + " days"));
+        WindowGuidance().Text(WindowGuidanceText(windowDays));
+        bool autoTrain = MetaGet("ml_auto_train", "1") == "1";
+        AutoTrainToggle().IsOn(autoTrain);
+
+        std::string lastTrain = MetaGet("ml_last_train", "");
+        std::string learnStart = MetaGet("ml_learn_start", "");
+        long long modelRows = atoll(MetaGet("ml_model_rows", "0").c_str());
+        long long flowsInWindow = 0;
+        {
+            ng::Db d;
+            if (d.open(DbPathU8().c_str()))
+                flowsInWindow = atoll(d.scalar(("SELECT count(*) FROM flow_features WHERE ts_utc >= "
+                    "strftime('%Y-%m-%dT%H:%M:%fZ','now','-" + std::to_string(windowDays) + " days')").c_str()).c_str());
+        }
+        if (!lastTrain.empty())
+        {
+            std::time_t t = (std::time_t)atoll(lastTrain.c_str());
+            std::tm tm{}; localtime_s(&tm, &t);
+            char when[32]; std::strftime(when, sizeof when, "%b %d, %I:%M %p", &tm);
+            ModelStatus().Text(U8("Active - trained on " + std::to_string(modelRows) + " of your flows"));
+            std::string sub = "Last refreshed " + std::string(when) + ".";
+            if (mode == "shadow")
+                sub += " Scoring in Shadow - review anomalies in Flows, then switch to Active above when you're comfortable.";
+            ModelStatusSub().Text(U8(sub));
+        }
+        else if (!learnStart.empty())
+        {
+            int elapsed = (int)(((long long)time(nullptr) - atoll(learnStart.c_str())) / 86400);
+            if (elapsed < 0) elapsed = 0;
+            ModelStatus().Text(U8("Learning your traffic - " + std::to_string(elapsed) + " of " + std::to_string(windowDays) + " days"));
+            ModelStatusSub().Text(U8(std::to_string(flowsInWindow) + " flows collected so far. " +
+                (autoTrain ? "It trains and activates automatically once the window is complete."
+                           : "Auto-train is off - use Retrain now when you're ready.")));
+        }
+        else
+        {
+            ModelStatus().Text(L"Waiting to start learning");
+            ModelStatusSub().Text(L"The model begins building your baseline once the service is collecting flow features (toggle above).");
+        }
+
         loadingSettings_ = false;
         RefreshServiceStatus();
         AboutVersion().Text(U8("v" + std::string(NG_VERSION)));

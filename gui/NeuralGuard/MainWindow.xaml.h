@@ -37,6 +37,12 @@ namespace winrt::NeuralGuard::implementation
         void OnThemeChanged(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnMlThresholdChanged(winrt::Microsoft::UI::Xaml::Controls::NumberBox const&,
                                   winrt::Microsoft::UI::Xaml::Controls::NumberBoxValueChangedEventArgs const&);
+        // Anomaly-model lifecycle (Phase C): the adaptation-window slider, the
+        // auto-train toggle, and the manual "Retrain now" button.
+        void OnWindowChanged(winrt::Windows::Foundation::IInspectable const&,
+                             winrt::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const&);
+        void OnAutoTrainToggle(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
+        void OnRetrainNow(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnClearFlags(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnExportFeedback(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
         void OnCheckUpdate(winrt::Windows::Foundation::IInspectable const&, winrt::Microsoft::UI::Xaml::RoutedEventArgs const&);
