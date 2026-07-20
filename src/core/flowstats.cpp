@@ -16,9 +16,11 @@
 #include <psapi.h>
 #include <windows.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <map>
 #include <set>
 #include <string>
@@ -34,6 +36,8 @@ namespace {
 
 constexpr int kRetentionDays = 30;   // auto-purge window
 constexpr DWORD kPollMs = 2000;      // TCP-table poll interval
+constexpr DWORD kAutoCheckMs = 60000;   // re-evaluate the ML lifecycle at most this often
+constexpr int kTrainFloorRows = 300;    // min flows in the window before the first auto-train
 
 std::string IpStr(DWORD addrBE) {
     in_addr a; a.S_un.S_addr = addrBE;
@@ -298,6 +302,15 @@ bool FlowCollector::run(int seconds) {
             }
         }
 
+        // Phase B: evaluate the ML lifecycle (start the learning clock, auto-train
+        // when a full window exists, nightly rolling retrain) at most once per
+        // kAutoCheckMs - or immediately on a manual "retrain now" request.
+        if (!anomalyPath_.empty() &&
+            (retrainNow_.load() || GetTickCount64() - lastAutoCheckMs_ >= kAutoCheckMs)) {
+            lastAutoCheckMs_ = GetTickCount64();
+            maybeAutoTrain();
+        }
+
         if (seconds > 0 && GetTickCount64() >= deadline) break;
         if (WaitForSingleObject(static_cast<HANDLE>(stopEvent_), kPollMs) == WAIT_OBJECT_0) break;
     }
@@ -308,6 +321,85 @@ bool FlowCollector::run(int seconds) {
     stopEvent_ = nullptr;
     WSACleanup();
     return true;
+}
+
+std::size_t trainAnomalyModel(Db& db, const std::string& outPath, int windowDays) {
+    // Anti-poisoning: never train on flows the model itself scored anomalous, so
+    // it can't normalize a slow drift (or its own misses). anomaly_score is NULL
+    // before any model exists (the bootstrap train uses everything).
+    const std::string thr = db.meta("ml_anomaly_threshold", "-0.15");
+    std::string sql = "SELECT ts_utc, process_key, remote_port, duration_ms, bytes_in, bytes_out"
+                      " FROM flow_features WHERE (anomaly_score IS NULL OR anomaly_score > " + thr + ")";
+    if (windowDays > 0)
+        sql += " AND ts_utc >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-" + std::to_string(windowDays) + " days')";
+
+    std::vector<float> rows; std::size_t n = 0;
+    {
+        std::lock_guard<std::mutex> lk(db.mutex());   // read alongside the recorder/collector writers
+        sqlite3_stmt* s = nullptr;
+        if (sqlite3_prepare_v2(db.handle(), sql.c_str(), -1, &s, nullptr) != SQLITE_OK) return 0;
+        while (sqlite3_step(s) == SQLITE_ROW) {
+            auto txt = [&](int i) { const char* t = (const char*)sqlite3_column_text(s, i); return std::string(t ? t : ""); };
+            const std::string ts = txt(0), pkey = txt(1);
+            const int port = sqlite3_column_int(s, 2);
+            const long long dur = sqlite3_column_int64(s, 3), bi = sqlite3_column_int64(s, 4), bo = sqlite3_column_int64(s, 5);
+            const int hour = ts.size() >= 13 ? atoi(ts.substr(11, 2).c_str()) : 0;
+            std::vector<float> v = anomalyFeatures(dur, bi, bo, port, pkey.rfind("sig:", 0) == 0, hour);
+            rows.insert(rows.end(), v.begin(), v.end());
+            ++n;
+        }
+        sqlite3_finalize(s);
+    }
+    if (n == 0) return 0;                 // train off the DB lock (CPU, not a DB op)
+    IsolationForest forest;
+    if (!forest.train(rows, n) || !forest.save(outPath)) return 0;
+    return n;
+}
+
+void FlowCollector::maybeAutoTrain() {
+    const bool manual = retrainNow_.exchange(false);
+    if (!manual && db_.meta("ml_auto_train", "1") != "1") return;
+    if (anomalyPath_.empty()) return;
+
+    const long long now = (long long)time(nullptr);
+
+    // Start the learning clock the first time the collector ever runs.
+    if (db_.meta("ml_learn_start", "").empty()) {
+        db_.setMeta("ml_learn_start", std::to_string(now));
+        return;
+    }
+    const long long learnStart = atoll(db_.meta("ml_learn_start", "0").c_str());
+    const long long lastTrain  = atoll(db_.meta("ml_last_train", "0").c_str());
+    const int windowDays = std::max(1, atoi(db_.meta("ml_window_days", "14").c_str()));
+
+    bool due = manual;
+    if (!due && lastTrain == 0) {
+        // First train: a full adaptation window has elapsed AND enough flows exist.
+        if (now - learnStart >= (long long)windowDays * 86400) {
+            long long rows = 0;
+            std::lock_guard<std::mutex> lk(db_.mutex());
+            sqlite3_stmt* s = nullptr;
+            std::string q = "SELECT count(*) FROM flow_features WHERE ts_utc >= "
+                            "strftime('%Y-%m-%dT%H:%M:%fZ','now','-" + std::to_string(windowDays) + " days');";
+            if (sqlite3_prepare_v2(db_.handle(), q.c_str(), -1, &s, nullptr) == SQLITE_OK) {
+                if (sqlite3_step(s) == SQLITE_ROW) rows = sqlite3_column_int64(s, 0);
+                sqlite3_finalize(s);
+            }
+            due = rows >= kTrainFloorRows;
+        }
+    } else if (!due) {
+        due = (now - lastTrain >= 86400);   // nightly rolling retrain
+    }
+    if (!due) return;
+
+    const std::size_t n = trainAnomalyModel(db_, anomalyPath_, windowDays);
+    if (n > 0) {
+        anomaly_.load(anomalyPath_);   // hot-swap: scoring immediately uses the fresh model
+        db_.setMeta("ml_last_train", std::to_string(now));
+        db_.setMeta("ml_model_rows", std::to_string((long long)n));
+        printf("anomaly model %s on %zu flow(s) (window %dd).\n",
+               lastTrain == 0 ? "trained + activated" : "refreshed", n, windowDays);
+    }
 }
 
 }  // namespace ng

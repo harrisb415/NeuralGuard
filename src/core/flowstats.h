@@ -50,7 +50,16 @@ public:
         active_ = active;
     }
 
+    // Phase B: ask the running collector to retrain the anomaly model on its next
+    // loop (thread-safe; the dashboard's "Retrain now" -> service -> here).
+    void requestRetrain() { retrainNow_.store(true); }
+
 private:
+    // Periodic lifecycle check on the collector's own thread: sets the learning
+    // start clock, auto-trains once a full adaptation window of data exists, and
+    // rolling-retrains nightly - then hot-reloads the model. No-op if auto-train
+    // is off. Cheap; gated to run at most once per kAutoCheckMs.
+    void maybeAutoTrain();
     Db& db_;
     IdentityResolver& id_;
     DnsWatcher* dns_ = nullptr;
@@ -60,7 +69,15 @@ private:
     OnnxModel supervised_;      // still ONNX (the optional public-dataset classifier)
     void* stopEvent_ = nullptr;
     std::atomic<unsigned long long> written_{ 0 };
+    std::atomic<bool> retrainNow_{ false };       // manual "retrain now" request
+    unsigned long long lastAutoCheckMs_ = 0;      // wall-clock gate for maybeAutoTrain
 };
+
+// Train the native anomaly model from flow_features and write it to `outPath`.
+// windowDays: rolling window (0 = all history). Excludes flows already scored
+// anomalous (anti-poisoning: the model must not learn its own misses as normal).
+// Returns the number of flows trained on (0 = nothing to train / failed).
+std::size_t trainAnomalyModel(Db& db, const std::string& outPath, int windowDays);
 
 // Delete flow_features rows older than `days`. Returns rows removed (-1 on error).
 long long PurgeFlowFeatures(Db& db, int days);

@@ -999,35 +999,14 @@ int main(int argc, char** argv) {
         int days = argc >= 4 ? atoi(argv[3]) : 0;
         ng::Db db;
         if (!db.open(dbPath)) { fprintf(stderr, "cannot open %s\n", dbPath); return 1; }
-        std::string sql =
-            "SELECT ts_utc, process_key, remote_port, duration_ms, bytes_in, bytes_out FROM flow_features";
-        if (days > 0)
-            sql += " WHERE ts_utc >= strftime('%Y-%m-%dT%H:%M:%fZ','now','-" + std::to_string(days) + " days')";
-        std::vector<float> rows; size_t n = 0;
-        sqlite3_stmt* s = nullptr;
-        if (sqlite3_prepare_v2(db.handle(), sql.c_str(), -1, &s, nullptr) != SQLITE_OK) {
-            fprintf(stderr, "query failed: %s\n", sqlite3_errmsg(db.handle())); return 1;
-        }
-        while (sqlite3_step(s) == SQLITE_ROW) {
-            auto txt = [&](int i) { const char* t = (const char*)sqlite3_column_text(s, i); return std::string(t ? t : ""); };
-            std::string ts = txt(0), pkey = txt(1);
-            int port = sqlite3_column_int(s, 2);
-            long long dur = sqlite3_column_int64(s, 3), bin = sqlite3_column_int64(s, 4), bout = sqlite3_column_int64(s, 5);
-            int hour = ts.size() >= 13 ? atoi(ts.substr(11, 2).c_str()) : 0;
-            std::vector<float> v = ng::anomalyFeatures(dur, bin, bout, port, pkey.rfind("sig:", 0) == 0, hour);
-            rows.insert(rows.end(), v.begin(), v.end());
-            ++n;
-        }
-        sqlite3_finalize(s);
+        std::string out = ModelPathFor(dbPath, "anomaly.model");
+        size_t n = ng::trainAnomalyModel(db, out, days);   // shared with the service's auto-train
         if (n == 0) {
-            fprintf(stderr, "no flow_features rows%s - collect first (ngd features on).\n", days > 0 ? " in window" : "");
+            fprintf(stderr, "no flow_features rows to train on%s - collect first (ngd features on).\n",
+                    days > 0 ? " in window" : "");
             return 1;
         }
-        ng::IsolationForest forest;
-        forest.train(rows, n);
-        std::string out = ModelPathFor(dbPath, "anomaly.model");
-        if (!forest.save(out)) { fprintf(stderr, "save failed: %s\n", out.c_str()); return 1; }
-        printf("trained anomaly model on %zu flow(s), %zu trees -> %s\n", n, forest.treeCount(), out.c_str());
+        printf("trained anomaly model on %zu flow(s) -> %s\n", n, out.c_str());
         if (n < 200) fprintf(stderr, "note: only %zu rows; small/placeholder model - let more accumulate.\n", n);
         return 0;
     }

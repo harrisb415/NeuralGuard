@@ -142,6 +142,13 @@ const char* kSchema =
     // anomaly <= anomaly (more negative = more anomalous) => review.
     "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_malicious_threshold','0.9');"
     "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_anomaly_threshold','-0.15');"
+    // Phase B lifecycle: the anomaly model trains itself on-device. ml_window_days
+    // is the user-set "adaptation window" - how many days of recent traffic the
+    // model always reflects: the initial learning period AND the rolling-retrain
+    // window. ml_auto_train gates the whole automatic lifecycle. ml_learn_start /
+    // ml_last_train / ml_model_rows are written at runtime (absence = not started).
+    "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_window_days','14');"
+    "INSERT OR IGNORE INTO meta(k,v) VALUES('ml_auto_train','1');"
     // Inbound services WE blocked (inbound_mode='enforce'), for passive review.
     // Inbound is never prompted: a remote party must never be able to pop a dialog
     // on your screen, and the decision you actually want to make is per SERVICE

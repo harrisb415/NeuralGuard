@@ -228,6 +228,14 @@ std::string HandleCommand(Db& db, const std::string& req) {
     if (verb == "STATUS")
         return "OK mode=" + db.meta("mode", "idle") + " desired=" + db.meta("desired_mode", "idle");
 
+    if (verb == "RETRAIN") {
+        // Dashboard "Retrain now": the collector retrains the anomaly model on its
+        // next loop and hot-swaps it. Only possible while it's actually collecting.
+        if (!g_collector) return "ERR not collecting (feature archival off, or ML off)";
+        g_collector->requestRetrain();
+        return "OK retrain requested";
+    }
+
     if (verb == "MODE") {
         if (arg != "enforcing" && arg != "learning" && arg != "idle")
             return "ERR mode must be enforcing|learning|idle";
